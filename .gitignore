@@ -1,0 +1,47 @@
+# Built application files
+*.apk
+*.aab
+
+# Android Studio internal files
+/.idea/
+/*.iml
+
+# Gradle cache and wrappers
+/.gradle
+/gradle/wrapper/gradle-wrapper.properties
+
+# Build outputs (root and app module)
+/build/
+app/build/
+
+# Local configuration (SDK paths are machine-specific)
+local.properties
+
+# Environment files
+.env
+
+# OSX
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Thumbs.db
+Thumbs.db
+ehthumbs.db
+*.localized
+
+# Generated files
+generated/
+
+# NDK
+/*/libs/*/
+
+# Kotlin error metadata
+/.kotlin/
+
+# Meta Wearables specific
+/.m2w/
+
+# Backup and temporary files
+*.bak
+*.tmp

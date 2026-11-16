@@ -1,0 +1,4 @@
+<full-backup-content>
+    <exclude domain="sharedpref" path="itglasses_pairing.xml"/>
+        <exclude domain="sharedpref" path="itglasses_network_config.xml"/>
+</full-backup-content>
