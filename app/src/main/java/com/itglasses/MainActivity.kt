@@ -45,6 +45,10 @@ class MainActivity : AppCompatActivity() {
                 pairing.code.takeIf { it.isNotEmpty() }?.let { PairingState.Pending(it, pairing.expires) }),
         )
     }
+    // Pairing mode: failed chat and voice calls -> fixed Spanish notices (never the exception or the body).
+    private val callErrors = CallErrors()
+    private val notice = TransientNotice()
+    private var noticeJob: kotlinx.coroutines.Job? = null
     // Shared-token mode only for an APK without pairing origin; with one, the stored token is kept but never sent.
     private val legacyAuth = AuthInterceptor { activeToken }
     private val backendUrl: String?
@@ -173,6 +177,7 @@ class MainActivity : AppCompatActivity() {
         // Without a pairing origin the controller is never created: shared-token mode as before.
         renderPairing(if (pairing.configured) pairingController.state.value else PairingState.Unconfigured)
         if (pairing.configured) {
+            binding.tvStatus.text = null  // No "Loading..." in pairing mode: the card says how things stand.
             binding.btnPair.setOnClickListener { pairingController.onEvent(PairingEvent.UserRetry) }
             // Pairing runs only while the app is visible: repeatOnLifecycle cancels it on onStop.
             lifecycleScope.launch {
@@ -221,6 +226,34 @@ class MainActivity : AppCompatActivity() {
         CallCheck.UNAVAILABLE -> pairingText(PairingText.FORBIDDEN_CALL)
         CallCheck.RESOLVED -> PairingScreen.view(pairingController.state.value, 0L, null).title?.let { pairingText(it) }.orEmpty()
         CallCheck.IDLE, CallCheck.CHECKING -> pairingText(PairingText.CALL_CHECKING)
+    }
+
+    /** Text for a failed call in pairing mode; 403 waits for the controller's status check. */
+    private fun callFailureText(outcome: CallOutcome): String = when (outcome) {
+        CallOutcome.DeviceCheck -> callCheckMessage(pairingController.callCheck.value)
+        is CallOutcome.Notice ->
+            if (outcome.arg == null) getString(CallTexts.of(outcome.text)) else getString(CallTexts.of(outcome.text), outcome.arg)
+    }
+
+    /** UI thread. The failed message stays in the conversation with the notice instead of an answer. */
+    private fun showChatFailure(message: String, outcome: CallOutcome) {
+        val text = callFailureText(outcome)
+        binding.tvChatOutput.append("\n$message -> \u26A0 $text")
+        showNotice(text)
+    }
+
+    /**
+     * UI thread. Status-line notice for 8 s; a newer one replaces it and restarts the time. A network failure
+     * never touches the pairing card. The line is cleared only if it still shows this notice.
+     */
+    private fun showNotice(text: String) {
+        val ticket = notice.show(text)
+        binding.tvStatus.text = text
+        noticeJob?.cancel()
+        noticeJob = lifecycleScope.launch {
+            delay(notice.durationMs)
+            if (notice.expire(ticket) && binding.tvStatus.text.toString() == text) binding.tvStatus.text = null
+        }
     }
 
     private fun pairingText(text: PairingText, arg: String? = null): String =
@@ -308,7 +341,7 @@ class MainActivity : AppCompatActivity() {
         if (message.isEmpty()) return
 
         binding.btnSend.isEnabled = false
-        updateStatus("Generating response...")
+        updateStatus(if (pairing.configured) getString(R.string.call_generating) else "Generating response...")
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val json = org.json.JSONObject().put("message", message).toString()
@@ -326,20 +359,31 @@ class MainActivity : AppCompatActivity() {
                             } catch (e: Exception) { responseBody }
                             binding.tvChatOutput.text = "${binding.tvChatOutput.text}\n$message -> $answer"
                             binding.etMessage.text?.clear()
-                            updateStatus("Connected")
+                            if (pairing.configured) {
+                                callErrors.onSuccess()
+                                updateStatus("")
+                            } else updateStatus("Connected")
+                        } else if (pairing.configured) {
+                            showChatFailure(message, callErrors.describe(response.code))
                         } else if (response.code == 401) {
                             binding.tvChatOutput.text = "${binding.tvChatOutput.text}\nError: ${authenticationMessage()}"
                             updateStatus("Authentication failed (HTTP 401)")
-                        } else if (response.code == 403 && pairing.configured) {
-                            updateStatus(callCheckMessage(pairingController.callCheck.value))
                         } else {
                             binding.tvChatOutput.text = "${binding.tvChatOutput.text}\nError: HTTP ${response.code} ${responseBody ?: ""}"
                             updateStatus("Connected")
                         }
-                        binding.btnSend.isEnabled = true
+                        binding.btnSend.isEnabled = voiceAllowed()
                     }
                 }
             } catch (e: Exception) {
+                if (pairing.configured) {
+                    val outcome = callErrors.describe(e)  // A CancellationException is rethrown: nothing is shown.
+                    runOnUiThread {
+                        showChatFailure(message, outcome)
+                        binding.btnSend.isEnabled = voiceAllowed()
+                    }
+                    return@launch
+                }
                 runOnUiThread {
                     binding.tvChatOutput.text = "${binding.tvChatOutput.text}\nError: ${e.javaClass.simpleName}: ${e.message}"
                     updateStatus("Connected")
@@ -527,12 +571,21 @@ class MainActivity : AppCompatActivity() {
                 // 3. Piper synthesis.
                 runOnUiThread { setState(UiState.Synthesizing) }
                 val audioBytes = synthesizeSpeech(answer)
+                callErrors.onSuccess()
 
                 // 4. MediaPlayer playback.
                 playAudio(audioBytes)
 
             } catch (e: Exception) {
-                runOnUiThread {
+                if (pairing.configured) {
+                    val outcome = callErrors.describe(e)  // A CancellationException is rethrown: nothing is shown.
+                    runOnUiThread {
+                        val text = callFailureText(outcome)
+                        binding.tvAiResponse.text = text
+                        setState(UiState.Error)
+                        showNotice(text)
+                    }
+                } else runOnUiThread {
                     binding.tvAiResponse.text = getString(R.string.transcription_error)
                     setState(UiState.Error)
                     updateStatus("Error: ${e.javaClass.simpleName}: ${e.message ?: ""}")
@@ -564,11 +617,9 @@ class MainActivity : AppCompatActivity() {
         return okHttpClient.newCall(request).execute().use { response ->
             val responseBody = response.body?.string() ?: ""
             if (!response.isSuccessful) {
+                if (pairing.configured) throw CallHttpException(response.code)  // Only the status, never the body.
                 if (response.code == 401) {
                     throw RuntimeException(authenticationMessage())
-                }
-                if (response.code == 403 && pairing.configured) {
-                    throw RuntimeException(callCheckMessage(pairingController.callCheck.value))
                 }
                 throw RuntimeException("Transcribe HTTP ${response.code} ${response.message ?: ""}")
             }
@@ -593,11 +644,9 @@ class MainActivity : AppCompatActivity() {
         return okHttpClient.newCall(request).execute().use { response ->
             val responseBody = response.body?.string() ?: ""
             if (!response.isSuccessful) {
+                if (pairing.configured) throw CallHttpException(response.code)  // Only the status, never the body.
                 if (response.code == 401) {
                     throw RuntimeException(authenticationMessage())
-                }
-                if (response.code == 403 && pairing.configured) {
-                    throw RuntimeException(callCheckMessage(pairingController.callCheck.value))
                 }
                 throw RuntimeException("Chat HTTP ${response.code} ${response.message ?: ""}")
             }
@@ -621,11 +670,9 @@ class MainActivity : AppCompatActivity() {
             .build()
         return okHttpClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
+                if (pairing.configured) throw CallHttpException(response.code)  // Only the status, never the body.
                 if (response.code == 401) {
                     throw RuntimeException(authenticationMessage())
-                }
-                if (response.code == 403 && pairing.configured) {
-                    throw RuntimeException(callCheckMessage(pairingController.callCheck.value))
                 }
                 throw RuntimeException("Synthesize HTTP ${response.code} ${response.message ?: ""}")
             }
