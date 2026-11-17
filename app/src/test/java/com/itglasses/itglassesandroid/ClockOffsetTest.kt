@@ -4,6 +4,8 @@ import com.itglasses.itglassesandroid.ClockOffset.Observation
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import java.util.Locale
+import java.util.TimeZone
 
 class ClockOffsetTest {
     private val rfcExample = "Sun, 06 Nov 1994 08:49:37 GMT"
@@ -13,6 +15,20 @@ class ClockOffsetTest {
     @Test fun parsesHttpDates() {
         assertEquals(rfcEpoch, ClockOffset.parseHttpDate(rfcExample))
         assertEquals(1_794_932_400L, ClockOffset.parseHttpDate("Tue, 17 Nov 2026 16:20:00 GMT"))
+    }
+
+    @Test fun parsingIgnoresThePhoneLanguageAndTimeZone() {
+        // "Tue" and "Nov" are English in HTTP; a phone in es-MX would say "mar." and "nov.".
+        val locale = Locale.getDefault()
+        val zone = TimeZone.getDefault()
+        try {
+            Locale.setDefault(Locale.forLanguageTag("es-MX"))
+            TimeZone.setDefault(TimeZone.getTimeZone("America/Mexico_City"))
+            assertEquals(1_794_909_600L, ClockOffset.parseHttpDate("Tue, 17 Nov 2026 10:00:00 GMT"))
+        } finally {
+            Locale.setDefault(locale)
+            TimeZone.setDefault(zone)
+        }
     }
 
     @Test fun rejectsMissingOrMalformedDates() {
