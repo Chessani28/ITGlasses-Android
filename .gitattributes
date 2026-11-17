@@ -1,0 +1,4 @@
+# Wrapper de Gradle: gradlew debe ejecutarse en Linux/macOS, los .bat en Windows.
+gradlew text eol=lf
+*.bat   text eol=crlf
+*.jar   binary
