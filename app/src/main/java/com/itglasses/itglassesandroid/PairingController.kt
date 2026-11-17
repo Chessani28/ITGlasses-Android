@@ -16,6 +16,13 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicBoolean
 
+/**
+ * Outcome of the /pairing/status check started by a 403 on a normal call (chat, voice).
+ * CHECKING: still waiting. UNAVAILABLE: still Connected, so that function is not allowed for the phone.
+ * RESOLVED: the device is no longer Connected (e.g. blocked); the pairing card already says why.
+ */
+internal enum class CallCheck { IDLE, CHECKING, UNAVAILABLE, RESOLVED }
+
 /** Network side of pairing. Implemented by DevicePairingGateway (tanda 2b); faked in the tests. */
 internal interface PairingGateway {
     /** A request id is stored (pending, or an active device). */
@@ -49,9 +56,14 @@ internal class PairingController(private val gateway: PairingGateway, initial: P
     /** True from the first 403 on a normal call until its status check has finished. */
     private val recheckQueued = AtomicBoolean(false)
     private val mutableState = MutableStateFlow(initial.state)
+    private val mutableCallCheck = MutableStateFlow(CallCheck.IDLE)
+    /** The RECHECK in the current step was caused by a 403 on a normal call (consumer only). */
+    private var checkingCall = false
     @Volatile private var current: PairingStep = initial
 
     val state: StateFlow<PairingState> = mutableState.asStateFlow()
+    /** Thread-safe; set to CHECKING by onCallResponse(403) before the caller sees the response. */
+    val callCheck: StateFlow<CallCheck> = mutableCallCheck.asStateFlow()
     /** The step waiting to run (action and delay); for the UI countdown and the tests. */
     val pending: PairingStep get() = current
 
@@ -63,7 +75,14 @@ internal class PairingController(private val gateway: PairingGateway, initial: P
     /** HTTP status of a normal call (chat, voice). Thread-safe; 403 bursts give a single status check. */
     fun onCallResponse(code: Int) {
         when (code) {
-            403 -> if (recheckQueued.compareAndSet(false, true)) inbox.trySend(Inbound.Call(403))
+            403 -> when {
+                state.value != PairingState.Connected -> mutableCallCheck.value = CallCheck.RESOLVED
+                recheckQueued.compareAndSet(false, true) -> {
+                    mutableCallCheck.value = CallCheck.CHECKING
+                    inbox.trySend(Inbound.Call(403))
+                }
+                // Otherwise a check is already queued or running, and callCheck is already CHECKING.
+            }
             410 -> inbox.trySend(Inbound.Call(410))
         }
     }
@@ -87,7 +106,11 @@ internal class PairingController(private val gateway: PairingGateway, initial: P
     private suspend fun advance(inbound: Inbound?) {
         mutex.withLock {
             when (inbound) {
-                null -> perform(current)?.let { apply(it) }
+                null -> {
+                    val action = current.action
+                    perform(current)?.let { apply(it) }
+                    if (action == RECHECK && checkingCall) settleCall()
+                }
                 is Inbound.Event -> apply(inbound.event)
                 is Inbound.Call -> call(inbound.code)
             }
@@ -98,8 +121,14 @@ internal class PairingController(private val gateway: PairingGateway, initial: P
     private suspend fun call(code: Int) {
         val connected = current.state == PairingState.Connected
         when {
-            code == 403 && connected -> apply(PairingEvent.ForbiddenCall)
-            code == 403 -> recheckQueued.set(false)
+            code == 403 && connected -> {
+                apply(PairingEvent.ForbiddenCall)
+                checkingCall = current.action == RECHECK
+            }
+            code == 403 -> {
+                recheckQueued.set(false)
+                mutableCallCheck.value = CallCheck.RESOLVED
+            }
             code == 410 && connected -> apply(PairingEvent.Http(410, VERIFY))
         }
     }
@@ -125,11 +154,19 @@ internal class PairingController(private val gateway: PairingGateway, initial: P
         }
     }
 
+    private fun settleCall() {
+        checkingCall = false
+        mutableCallCheck.value =
+            if (current.state == PairingState.Connected) CallCheck.UNAVAILABLE else CallCheck.RESOLVED
+    }
+
     private suspend fun apply(event: PairingEvent) {
         val next = PairingMachine.next(current.state, event)
         if (next.forgetRequest) gateway.forgetRequest()
         current = next
         mutableState.value = next.state
+        // Another event replaced the pending status check (e.g. a 410): settle it so nothing waits forever.
+        if (checkingCall && next.action != RECHECK) settleCall()
         if (event == PairingEvent.ForbiddenCall && next.action != RECHECK) recheckQueued.set(false)
     }
 }

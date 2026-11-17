@@ -28,4 +28,36 @@
     <string name="meta_register">Register with Meta AI</string>
     <string name="meta_start_session">Connect DAT session</string>
     <string name="meta_stop_session">Stop DAT session</string>
+    <!-- Emparejamiento y conexión del dispositivo (etapa 5). Claves: PairingText -> PairingTexts.kt. -->
+    <string name="pairing_registering_title">Registrando este celular…</string>
+    <string name="pairing_registering_detail">Conectando con el servidor de ITGlasses.</string>
+    <string name="pairing_expired_title">La solicitud caducó. Generando un código nuevo…</string>
+    <string name="pairing_removed_title">Este celular se eliminó del panel. Registrándolo de nuevo…</string>
+    <string name="pairing_pending_title">Dispositivo pendiente de aprobación</string>
+    <string name="pairing_pending_detail">Aprueba en el panel de ITGlasses el dispositivo que muestre este mismo código.</string>
+    <string name="pairing_pending_expires">La solicitud caduca en %1$s.</string>
+    <string name="pairing_code_spoken">Código %1$s</string>
+    <string name="pairing_connected_title">Conectado</string>
+    <string name="pairing_connected_detail">Este celular está aprobado: %1$s.</string>
+    <string name="pairing_connected_detail_unknown">Este celular está aprobado.</string>
+    <string name="pairing_blocked_title">Dispositivo bloqueado</string>
+    <string name="pairing_blocked_detail">Un administrador bloqueó este celular. Cuando lo desbloquee, pulsa «Comprobar de nuevo».</string>
+    <string name="pairing_denied_title">Solicitud rechazada</string>
+    <string name="pairing_denied_detail">Un administrador rechazó esta solicitud.</string>
+    <string name="pairing_offline_title">Sin conexión con el servidor</string>
+    <string name="pairing_offline_detail">Reintentando en %1$s s. Comprueba que el celular esté en la misma Wi-Fi que la PC.</string>
+    <string name="pairing_rate_limited_title">Demasiadas solicitudes pendientes</string>
+    <string name="pairing_rate_limited_detail">Reintentando en %1$s s.</string>
+    <string name="pairing_certificate_title">No se pudo verificar el servidor</string>
+    <string name="pairing_certificate_detail">El certificado HTTPS no es de confianza para esta APK.</string>
+    <string name="pairing_clock_title">La hora del celular no coincide</string>
+    <string name="pairing_clock_detail">Activa «Fecha y hora automáticas» en Ajustes y pulsa «Reintentar».</string>
+    <string name="pairing_failed_title">No se pudo completar el emparejamiento</string>
+    <string name="pairing_failed_detail">Inténtalo de nuevo en unos segundos.</string>
+    <string name="pairing_unconfigured_detail">Esta APK no tiene configurada la dirección HTTPS del servidor.</string>
+    <string name="pairing_call_checking">Comprobando el estado del dispositivo…</string>
+    <string name="pairing_forbidden_call">Esta función no está disponible para el celular.</string>
+    <string name="pairing_button_check_again">Comprobar de nuevo</string>
+    <string name="pairing_button_request_again">Solicitar de nuevo</string>
+    <string name="pairing_button_retry">Reintentar</string>
 </resources>

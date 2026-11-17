@@ -13,9 +13,13 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.itglasses.itglassesandroid.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -34,10 +38,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var wearablesIntegration: WearablesIntegration
 
     private val pairing by lazy { DevicePairing(applicationContext, BuildConfig.PAIRING_ORIGIN) }
-    private var pairingRunning = false
+    private val pairingController by lazy {
+        PairingController(
+            DevicePairingGateway(pairing, { DeviceInfo.name(applicationContext) }, DeviceInfo::model),
+            PairingMachine.start(pairing.configured, pairing.id.isNotEmpty(), pairing.managed,
+                pairing.code.takeIf { it.isNotEmpty() }?.let { PairingState.Pending(it, pairing.expires) }),
+        )
+    }
+    // Shared-token mode only for an APK without pairing origin; with one, the stored token is kept but never sent.
     private val legacyAuth = AuthInterceptor { activeToken }
     private val backendUrl: String?
-        get() = if (pairing.managed) pairing.origin else BackendConfiguration.getBaseUrl(this)
+        get() = if (pairing.configured) pairing.origin else BackendConfiguration.getBaseUrl(this)
     private val STATUS_ENDPOINT = "/api/v1/status"
     private val CHAT_ENDPOINT = "/api/v1/chat"
     private val TRANSCRIBE_ENDPOINT = "/api/v1/voice/transcribe"
@@ -49,13 +60,12 @@ class MainActivity : AppCompatActivity() {
         OkHttpClient.Builder()
             .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
             .addInterceptor { chain ->
-                if (pairing.managed) {
+                if (pairing.configured) {
+                    // OkHttp thread: only queues work for the controller (403 -> status check, 410 -> register again).
                     try {
-                        pairing.authorize(chain).also { response ->
-                            if (response.code == 401) runOnUiThread { runPairing() }
-                        }
+                        pairing.authorize(chain).also { response -> pairingController.onCallResponse(response.code) }
                     } catch (e: PairingError) {
-                        if (e.status == 401) runOnUiThread { runPairing() }
+                        pairingController.onCallResponse(e.status)
                         throw e
                     }
                 } else legacyAuth.intercept(chain)
@@ -90,7 +100,7 @@ class MainActivity : AppCompatActivity() {
         uiState = state
         runOnUiThread {
             val busy = state != UiState.Idle && state != UiState.Ready && state != UiState.Error
-            binding.btnVoice.isEnabled = !busy
+            binding.btnVoice.isEnabled = !busy && voiceAllowed()
             binding.tvStatus.text = when (state) {
                 UiState.Recording -> "Recording..."
                 UiState.Transcribing -> "Transcribing..."
@@ -160,66 +170,65 @@ class MainActivity : AppCompatActivity() {
         binding.tvTranscription.text = getString(R.string.transcription_pending)
         binding.tvAiResponse.text = ""
 
-        binding.btnPair.setOnClickListener { runPairing() }
-        pairingControls()
-        if (pairing.id.isNotEmpty()) runPairing()
-        else if (!pairing.managed && (activeToken != null || !pairing.configured)) connectToBackend()
-    }
-
-    private fun pairingControls() {
-        val legacy = !pairing.managed && (!activeToken.isNullOrBlank() || !pairing.configured || BackendConfiguration.hasCustomUrl(this))
-        val visibility = if (legacy) android.view.View.VISIBLE else android.view.View.GONE
-        for (view in listOf(binding.etBackendUrl, binding.etApiToken, binding.btnConnect,
-            binding.btnDisconnect, binding.tvBackendUrl)) view.visibility = visibility
-        binding.btnSend.isEnabled = legacy
-        binding.btnVoice.isEnabled = legacy
-        binding.btnPair.isEnabled = pairing.configured
-        if (!pairing.configured) binding.tvPairing.text = "Pendiente de configurar HTTPS en la APK"
-    }
-
-    private fun runPairing() {
-        if (pairingRunning || isDestroyed) return
-        pairingRunning = true
-        binding.btnPair.isEnabled = false
-        lifecycleScope.launch {
-            try {
-                if (pairing.id.isEmpty()) kotlinx.coroutines.withContext(Dispatchers.IO) { pairing.start() }
-                while (true) {
-                    if (pairing.code.isNotEmpty()) binding.tvPairing.text = "Esperando aprobación · " + pairing.code
-                    val state = kotlinx.coroutines.withContext(Dispatchers.IO) { pairing.poll() }
-                    if (state == "active") {
-                        BackendConfiguration.saveToken(this@MainActivity, null)
-                        activeToken = null
-                        binding.etApiToken.text?.clear()
-                        pairingControls()
-                        binding.btnPair.isEnabled = false
-                        binding.tvPairing.text = "Conectado · " + pairing.id.take(8)
-                        binding.btnSend.isEnabled = true
-                        binding.btnVoice.isEnabled = true
-                        break
-                    }
-                    if (state != "pending") {
-                        pairing.forgetRequest()
-                        pairingControls()
-                        binding.tvPairing.text = when (state) {
-                            "denied" -> "Solicitud rechazada"
-                            "revoked" -> "Dispositivo revocado"
-                            else -> "Solicitud vencida"
+        // Without a pairing origin the controller is never created: shared-token mode as before.
+        renderPairing(if (pairing.configured) pairingController.state.value else PairingState.Unconfigured)
+        if (pairing.configured) {
+            binding.btnPair.setOnClickListener { pairingController.onEvent(PairingEvent.UserRetry) }
+            // Pairing runs only while the app is visible: repeatOnLifecycle cancels it on onStop.
+            lifecycleScope.launch {
+                repeatOnLifecycle(Lifecycle.State.STARTED) {
+                    launch { pairingController.run() }
+                    launch { pairingController.state.collect { renderPairing(it) } }
+                    launch {
+                        // Result of the status check after a 403 (drop: do not repeat an old one on resume).
+                        pairingController.callCheck.drop(1).collect { check ->
+                            if (check == CallCheck.UNAVAILABLE || check == CallCheck.RESOLVED) updateStatus(callCheckMessage(check))
                         }
-                        break
                     }
-                    kotlinx.coroutines.delay(5000)
+                    launch {
+                        while (true) {
+                            delay(1000)
+                            val state = pairingController.state.value
+                            if (state is PairingState.Pending) renderPairing(state)
+                        }
+                    }
                 }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                if ((e is PairingError && e.status == 410) || !pairing.hasIdentity()) pairing.forgetRequest()
-                pairingControls()
-                binding.tvPairing.text = "No se pudo verificar el dispositivo. Revisa la conexión y la hora, y vuelve a emparejar."
-            } finally {
-                pairingRunning = false
             }
-        }
+        } else connectToBackend()
+    }
+
+    /** Draws the pairing card. The countdown uses server time, because expires_at is server time. */
+    private fun renderPairing(state: PairingState) {
+        val view = PairingScreen.view(state, pairing.clock.serverNow(System.currentTimeMillis()), DeviceInfo.model())
+        val legacy = if (view.sharedTokenMode) android.view.View.VISIBLE else android.view.View.GONE
+        for (field in listOf(binding.etBackendUrl, binding.etApiToken, binding.btnConnect,
+            binding.btnDisconnect, binding.tvBackendUrl)) field.visibility = legacy
+        binding.btnSend.isEnabled = view.canChat
+        binding.btnVoice.isEnabled = view.canChat && !isProcessing
+        showPairingText(binding.tvPairingTitle, view.title?.let { pairingText(it) })
+        showPairingText(binding.tvPairingCode, view.code)
+        binding.tvPairingCode.contentDescription = view.spokenCode?.let { pairingText(PairingText.CODE_SPOKEN, it) }
+        showPairingText(binding.tvPairing, view.detail?.let { pairingText(it, view.detailArg) })
+        showPairingText(binding.tvPairingNote, view.note?.let { pairingText(it, view.noteArg) })
+        showPairingText(binding.btnPair, view.button?.let { pairingText(it) })
+    }
+
+    /** Voice and Send only while Connected; always in shared-token mode (controller never created there). */
+    private fun voiceAllowed(): Boolean = !pairing.configured || pairingController.state.value == PairingState.Connected
+
+    /** 403 with a pairing origin: wait for the controller's status check instead of guessing. */
+    private fun callCheckMessage(check: CallCheck): String = when (check) {
+        CallCheck.UNAVAILABLE -> pairingText(PairingText.FORBIDDEN_CALL)
+        CallCheck.RESOLVED -> PairingScreen.view(pairingController.state.value, 0L, null).title?.let { pairingText(it) }.orEmpty()
+        CallCheck.IDLE, CallCheck.CHECKING -> pairingText(PairingText.CALL_CHECKING)
+    }
+
+    private fun pairingText(text: PairingText, arg: String? = null): String =
+        if (arg == null) getString(PairingTexts.of(text)) else getString(PairingTexts.of(text), arg)
+
+    private fun showPairingText(target: android.widget.TextView, value: String?) {
+        target.text = value.orEmpty()
+        target.visibility = if (value == null) android.view.View.GONE else android.view.View.VISIBLE
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -321,6 +330,8 @@ class MainActivity : AppCompatActivity() {
                         } else if (response.code == 401) {
                             binding.tvChatOutput.text = "${binding.tvChatOutput.text}\nError: ${authenticationMessage()}"
                             updateStatus("Authentication failed (HTTP 401)")
+                        } else if (response.code == 403 && pairing.configured) {
+                            updateStatus(callCheckMessage(pairingController.callCheck.value))
                         } else {
                             binding.tvChatOutput.text = "${binding.tvChatOutput.text}\nError: HTTP ${response.code} ${responseBody ?: ""}"
                             updateStatus("Connected")
@@ -468,7 +479,7 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             updateStatus("Error: ${e.message}")
             isProcessing = false
-            binding.btnVoice.isEnabled = true
+            binding.btnVoice.isEnabled = voiceAllowed()
         }
     }
 
@@ -529,7 +540,7 @@ class MainActivity : AppCompatActivity() {
             } finally {
                 runOnUiThread {
                     isProcessing = false
-                    binding.btnVoice.isEnabled = true
+                    binding.btnVoice.isEnabled = voiceAllowed()
                 }
             }
         }
@@ -555,6 +566,9 @@ class MainActivity : AppCompatActivity() {
             if (!response.isSuccessful) {
                 if (response.code == 401) {
                     throw RuntimeException(authenticationMessage())
+                }
+                if (response.code == 403 && pairing.configured) {
+                    throw RuntimeException(callCheckMessage(pairingController.callCheck.value))
                 }
                 throw RuntimeException("Transcribe HTTP ${response.code} ${response.message ?: ""}")
             }
@@ -582,6 +596,9 @@ class MainActivity : AppCompatActivity() {
                 if (response.code == 401) {
                     throw RuntimeException(authenticationMessage())
                 }
+                if (response.code == 403 && pairing.configured) {
+                    throw RuntimeException(callCheckMessage(pairingController.callCheck.value))
+                }
                 throw RuntimeException("Chat HTTP ${response.code} ${response.message ?: ""}")
             }
             org.json.JSONObject(responseBody).optString("answer", responseBody)
@@ -606,6 +623,9 @@ class MainActivity : AppCompatActivity() {
             if (!response.isSuccessful) {
                 if (response.code == 401) {
                     throw RuntimeException(authenticationMessage())
+                }
+                if (response.code == 403 && pairing.configured) {
+                    throw RuntimeException(callCheckMessage(pairingController.callCheck.value))
                 }
                 throw RuntimeException("Synthesize HTTP ${response.code} ${response.message ?: ""}")
             }

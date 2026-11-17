@@ -192,4 +192,67 @@ class PairingControllerTest {
         loop.cancel()
         assertEquals(listOf("status", "verify"), gateway.calls)
     }
+
+    @Test fun forbiddenCallOfAConnectedDeviceEndsAsUnavailable() = runBlocking {
+        val gateway = FakeGateway(PairingEvent.Status("active"))
+        val controller = connected(gateway)
+        assertEquals(CallCheck.IDLE, controller.callCheck.value)
+        controller.onCallResponse(403)
+        assertEquals(CallCheck.CHECKING, controller.callCheck.value)  // Before the caller shows anything.
+        controller.runOnce()  // Queued 403 -> RECHECK.
+        assertEquals(CallCheck.CHECKING, controller.callCheck.value)
+        controller.runOnce()  // /pairing/status says active.
+        assertEquals(CallCheck.UNAVAILABLE, controller.callCheck.value)
+        assertEquals(Connected, controller.state.value)
+    }
+
+    @Test fun forbiddenCallOfABlockedDeviceIsLeftToTheCard() = runBlocking {
+        val gateway = FakeGateway(PairingEvent.Status("blocked"))
+        val controller = connected(gateway)
+        controller.onCallResponse(403)
+        controller.runOnce()
+        controller.runOnce()
+        assertEquals(CallCheck.RESOLVED, controller.callCheck.value)
+        assertEquals(Blocked, controller.state.value)
+    }
+
+    @Test fun forbiddenCallCheckThatCannotReachTheServerIsLeftToTheCard() = runBlocking {
+        val gateway = FakeGateway(ConnectException("refused"))
+        val controller = connected(gateway)
+        controller.onCallResponse(403)
+        controller.runOnce()
+        controller.runOnce()
+        assertEquals(CallCheck.RESOLVED, controller.callCheck.value)
+        assertEquals(PairingState.Offline(5, 1, RECHECK, Connected), controller.state.value)
+    }
+
+    @Test fun periodicBlockedRechecksDoNotTouchTheCallCheck() = runBlocking {
+        val gateway = FakeGateway(PairingEvent.Status("blocked"))
+        gateway.hasRequest = true
+        val controller = PairingController(gateway, PairingStep(Blocked, RECHECK, 30))
+        controller.runOnce()
+        assertEquals(CallCheck.IDLE, controller.callCheck.value)
+    }
+
+    @Test fun forbiddenCallWhenNotConnectedIsResolvedAtOnce() = runBlocking {
+        val gateway = FakeGateway()
+        val controller = PairingController(gateway, PairingStep(Blocked, NONE))
+        controller.onCallResponse(403)
+        assertEquals(CallCheck.RESOLVED, controller.callCheck.value)
+        controller.runOnce()
+        assertTrue(gateway.calls.isEmpty())
+    }
+
+    @Test fun pendingCallCheckReplacedByAnotherEventIsSettled() = runBlocking {
+        val gateway = FakeGateway(PairingEvent.Registered("111222", 5, 5))
+        val controller = connected(gateway)
+        controller.onCallResponse(403)
+        controller.onCallResponse(410)
+        controller.runOnce()  // 403 -> RECHECK pending, CHECKING.
+        assertEquals(CallCheck.CHECKING, controller.callCheck.value)
+        controller.runOnce()  // 410 replaces the check: registering again, so the card explains it.
+        assertEquals(CallCheck.RESOLVED, controller.callCheck.value)
+        assertEquals(Registering(Reason.REMOVED), controller.state.value)
+        assertTrue(gateway.calls.isEmpty())
+    }
 }

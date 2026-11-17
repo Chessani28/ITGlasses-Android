@@ -18,10 +18,23 @@
             android:textStyle="bold"
             android:layout_marginBottom="16dp"/>
 
-        <Button android:id="@+id/btn_pair" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:text="EMPAREJAR DISPOSITIVO"/>
+        <!-- Pairing card. Texts come from PairingScreen/PairingTexts; the code's contentDescription
+             ("Código 4 8 2 9 1 3") is set from MainActivity because it changes with every request. -->
+        <TextView android:id="@+id/tv_pairing_title" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:textSize="18sp" android:textStyle="bold"
+            android:accessibilityLiveRegion="polite" android:visibility="gone"/>
+        <TextView android:id="@+id/tv_pairing_code" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:gravity="center" android:textSize="32sp"
+            android:typeface="monospace" android:textIsSelectable="false"
+            android:importantForAccessibility="yes" android:layout_marginTop="8dp"
+            android:layout_marginBottom="8dp"
+            android:visibility="gone"/>
         <TextView android:id="@+id/tv_pairing" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:accessibilityLiveRegion="polite"/>
+        <TextView android:id="@+id/tv_pairing_note" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:visibility="gone"/>
+        <Button android:id="@+id/btn_pair" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:visibility="gone"/>
 
         <TextView
             android:id="@+id/tv_backend_url"
