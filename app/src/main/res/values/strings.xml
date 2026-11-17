@@ -60,4 +60,21 @@
     <string name="pairing_button_check_again">Comprobar de nuevo</string>
     <string name="pairing_button_request_again">Solicitar de nuevo</string>
     <string name="pairing_button_retry">Reintentar</string>
+    <!-- Fallos de chat y voz en modo emparejamiento. Claves: CallText -> CallTexts.kt. -->
+    <!-- "la misma Wi-Fi que la PC" es específico del piloto (servidor en la PC de la oficina). -->
+    <string name="call_no_network">Sin conexión con el servidor. Comprueba que el celular esté en la misma Wi-Fi que la PC e inténtalo de nuevo.</string>
+    <string name="call_no_response">No se obtuvo respuesta del servidor. Comprueba la red o inténtalo en un momento.</string>
+    <string name="call_timeout">El asistente tardó demasiado en responder. Inténtalo de nuevo.</string>
+    <string name="call_certificate">No se pudo verificar el servidor (certificado HTTPS).</string>
+    <string name="call_clock">La hora del celular no coincide con la del servidor. Activa «Fecha y hora automáticas».</string>
+    <string name="call_unauthorized">La autorización del celular se está renovando. Inténtalo de nuevo.</string>
+    <string name="call_unauthorized_repeated">Si persiste, revisa la fecha y hora del celular o avisa al administrador.</string>
+    <string name="call_removed">Este celular se eliminó del panel y se está registrando de nuevo. Revisa la tarjeta.</string>
+    <string name="call_audio_too_long">El audio es demasiado largo (máximo 30 segundos).</string>
+    <string name="call_rejected">El servidor no aceptó el mensaje. Revisa que no supere los 4000 caracteres.</string>
+    <string name="call_rate_limited">Demasiadas peticiones seguidas. Espera unos segundos e inténtalo de nuevo.</string>
+    <string name="call_server_error">El servidor de ITGlasses tuvo un error. Inténtalo de nuevo.</string>
+    <string name="call_unexpected_code">Respuesta inesperada del servidor (código %1$s).</string>
+    <string name="call_failed">No se pudo completar la petición. Inténtalo de nuevo.</string>
+    <string name="call_generating">Generando respuesta…</string>
 </resources>
