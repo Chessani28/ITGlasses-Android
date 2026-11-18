@@ -18,6 +18,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.itglasses.itglassesandroid.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
@@ -49,6 +50,12 @@ class MainActivity : AppCompatActivity() {
     private val callErrors = CallErrors()
     private val notice = TransientNotice()
     private var noticeJob: kotlinx.coroutines.Job? = null
+    // Stage A: pairing card tone (dot and border colour) and the dot's pulse.
+    private val pulse by lazy { Pulse(binding.statusDot) }
+    private val dotColor by lazy {
+        ColorTransition(this) { binding.statusDot.backgroundTintList = android.content.res.ColorStateList.valueOf(it) }
+    }
+    private val strokeColor by lazy { ColorTransition(this) { binding.cardPairing.strokeColor = it } }
     // Shared-token mode only for an APK without pairing origin; with one, the stored token is kept but never sent.
     private val legacyAuth = AuthInterceptor { activeToken }
     private val backendUrl: String?
@@ -185,6 +192,10 @@ class MainActivity : AppCompatActivity() {
                     launch { pairingController.run() }
                     launch { pairingController.state.collect { renderPairing(it) } }
                     launch {
+                        // No looping animation outside the foreground; the next render restarts it.
+                        try { awaitCancellation() } finally { pulse.stop() }
+                    }
+                    launch {
                         // Result of the status check after a 403 (drop: do not repeat an old one on resume).
                         pairingController.callCheck.drop(1).collect { check ->
                             if (check == CallCheck.UNAVAILABLE || check == CallCheck.RESOLVED) updateStatus(callCheckMessage(check))
@@ -216,6 +227,12 @@ class MainActivity : AppCompatActivity() {
         showPairingText(binding.tvPairing, view.detail?.let { pairingText(it, view.detailArg) })
         showPairingText(binding.tvPairingNote, view.note?.let { pairingText(it, view.noteArg) })
         showPairingText(binding.btnPair, view.button?.let { pairingText(it) })
+        // Tone: the dot only when there is a title (none in shared-token mode); colour change of dot and border.
+        val dotShown = view.title != null
+        binding.statusDot.visibility = if (dotShown) android.view.View.VISIBLE else android.view.View.GONE
+        dotColor.to(ContextCompat.getColor(this, PairingTones.dot(view.tone)))
+        strokeColor.to(ContextCompat.getColor(this, PairingTones.stroke(view.tone)))
+        if (view.pulse && dotShown) pulse.start() else pulse.stop()
     }
 
     /** Voice and Send only while Connected; always in shared-token mode (controller never created there). */

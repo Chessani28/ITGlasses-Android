@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:fillViewport="true">
@@ -19,29 +20,62 @@
             android:layout_marginBottom="16dp"/>
 
         <!-- Pairing card. Texts come from PairingScreen/PairingTexts; the code's contentDescription
-             ("Código 4 8 2 9 1 3") is set from MainActivity because it changes with every request. -->
-        <TextView android:id="@+id/tv_pairing_title" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:textSize="18sp" android:textStyle="bold"
-            android:accessibilityLiveRegion="polite" android:visibility="gone"/>
-        <TextView android:id="@+id/tv_pairing_code" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:gravity="center" android:textSize="32sp"
-            android:typeface="monospace" android:textIsSelectable="false"
-            android:importantForAccessibility="yes" android:layout_marginTop="8dp"
-            android:layout_marginBottom="8dp"
-            android:visibility="gone"/>
-        <TextView android:id="@+id/tv_pairing" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:accessibilityLiveRegion="polite"/>
-        <TextView android:id="@+id/tv_pairing_note" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:visibility="gone"/>
-        <Button android:id="@+id/btn_pair" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:visibility="gone"/>
+             ("Código 4 8 2 9 1 3") is set from MainActivity because it changes with every request.
+             Stroke and dot colours follow the state's tone (PairingTones); the dot is decorative. -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/card_pairing"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            app:cardBackgroundColor="@color/itg_surface"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="0dp"
+            app:strokeWidth="1dp"
+            app:strokeColor="@color/itg_outline"
+            app:contentPadding="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <View android:id="@+id/status_dot" android:layout_width="10dp" android:layout_height="10dp"
+                        android:layout_marginEnd="10dp" android:background="@drawable/status_dot"
+                        android:importantForAccessibility="no" android:visibility="gone"/>
+                    <TextView android:id="@+id/tv_pairing_title" android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="wrap_content" android:textSize="18sp" android:textStyle="bold"
+                        android:accessibilityLiveRegion="polite" android:visibility="gone"/>
+                </LinearLayout>
+
+                <TextView android:id="@+id/tv_pairing_code" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:gravity="center" android:textSize="32sp"
+                    android:typeface="monospace" android:textIsSelectable="false"
+                    android:textColor="@color/itg_text_primary" android:letterSpacing="0.15"
+                    android:importantForAccessibility="yes" android:layout_marginTop="8dp"
+                    android:layout_marginBottom="8dp"
+                    android:visibility="gone"/>
+                <TextView android:id="@+id/tv_pairing" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:accessibilityLiveRegion="polite"/>
+                <TextView android:id="@+id/tv_pairing_note" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:visibility="gone"/>
+                <Button android:id="@+id/btn_pair" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:visibility="gone"/>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
         <TextView
             android:id="@+id/tv_backend_url"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:textSize="14sp"
-            android:textColor="#666"
+            android:textColor="@color/itg_text_secondary"
             android:layout_marginBottom="8dp"/>
 
         <androidx.appcompat.widget.AppCompatEditText
@@ -178,7 +212,7 @@
             android:layout_height="wrap_content"
             android:minHeight="100dp"
             android:layout_marginTop="8dp"
-            android:textColor="#000"/>
+            android:textColor="@color/itg_text_primary"/>
 
     </LinearLayout>
 </ScrollView>

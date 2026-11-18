@@ -17,6 +17,9 @@ internal enum class PairingText {
     BUTTON_CHECK_AGAIN, BUTTON_REQUEST_AGAIN, BUTTON_RETRY,
 }
 
+/** Colour of the card's dot and border (PairingTones maps it to res/values/colors.xml). */
+internal enum class PairingTone { ACCENT, WARNING, DANGER, NEUTRAL }
+
 /** What the card shows. Args fill the %1$s of their text. */
 internal data class PairingView(
     val title: PairingText? = null,
@@ -32,6 +35,9 @@ internal data class PairingView(
     val sharedTokenMode: Boolean = false,
     /** Enable Send and Voice. */
     val canChat: Boolean = false,
+    val tone: PairingTone = PairingTone.NEUTRAL,
+    /** Slow opacity pulse of the status dot (waiting for approval, connected). */
+    val pulse: Boolean = false,
 )
 
 internal object PairingScreen {
@@ -40,10 +46,10 @@ internal object PairingScreen {
         PairingState.Unconfigured ->
             PairingView(detail = PairingText.UNCONFIGURED_DETAIL, sharedTokenMode = true, canChat = true)
         is PairingState.Registering -> when (state.reason) {
-            Reason.EXPIRED -> PairingView(title = PairingText.EXPIRED_TITLE)
-            Reason.REMOVED -> PairingView(title = PairingText.REMOVED_TITLE)
-            Reason.FIRST, Reason.REQUESTED ->
-                PairingView(title = PairingText.REGISTERING_TITLE, detail = PairingText.REGISTERING_DETAIL)
+            Reason.EXPIRED -> PairingView(title = PairingText.EXPIRED_TITLE, tone = PairingTone.WARNING)
+            Reason.REMOVED -> PairingView(title = PairingText.REMOVED_TITLE, tone = PairingTone.WARNING)
+            Reason.FIRST, Reason.REQUESTED -> PairingView(title = PairingText.REGISTERING_TITLE,
+                detail = PairingText.REGISTERING_DETAIL, tone = PairingTone.WARNING)
         }
         is PairingState.Pending -> PairingView(
             title = PairingText.PENDING_TITLE,
@@ -52,25 +58,29 @@ internal object PairingScreen {
             spokenCode = DeviceLabel.spokenCode(state.code),
             note = PairingText.PENDING_EXPIRES,
             noteArg = DeviceLabel.countdown(state.expiresAt - serverNow),
+            tone = PairingTone.WARNING,
+            pulse = true,
         )
         PairingState.Connected -> PairingView(
             title = PairingText.CONNECTED_TITLE,
             detail = if (model == null) PairingText.CONNECTED_DETAIL_UNKNOWN else PairingText.CONNECTED_DETAIL,
             detailArg = model,
             canChat = true,
+            tone = PairingTone.ACCENT,
+            pulse = true,
         )
         PairingState.Blocked -> PairingView(PairingText.BLOCKED_TITLE, PairingText.BLOCKED_DETAIL,
-            button = PairingText.BUTTON_CHECK_AGAIN)
+            button = PairingText.BUTTON_CHECK_AGAIN, tone = PairingTone.DANGER)
         PairingState.Denied -> PairingView(PairingText.DENIED_TITLE, PairingText.DENIED_DETAIL,
-            button = PairingText.BUTTON_REQUEST_AGAIN)
+            button = PairingText.BUTTON_REQUEST_AGAIN, tone = PairingTone.DANGER)
         is PairingState.Offline -> PairingView(PairingText.OFFLINE_TITLE, PairingText.OFFLINE_DETAIL,
-            detailArg = state.retryIn.toString(), button = PairingText.BUTTON_RETRY)
+            detailArg = state.retryIn.toString(), button = PairingText.BUTTON_RETRY, tone = PairingTone.WARNING)
         is PairingState.RateLimited -> PairingView(PairingText.RATE_LIMITED_TITLE, PairingText.RATE_LIMITED_DETAIL,
-            detailArg = state.retryIn.toString())
+            detailArg = state.retryIn.toString(), tone = PairingTone.WARNING)
         is PairingState.CertificateRejected -> PairingView(PairingText.CERTIFICATE_TITLE,
             PairingText.CERTIFICATE_DETAIL, button = PairingText.BUTTON_RETRY)
         is PairingState.ClockMismatch -> PairingView(PairingText.CLOCK_TITLE, PairingText.CLOCK_DETAIL,
-            button = PairingText.BUTTON_RETRY)
+            button = PairingText.BUTTON_RETRY, tone = PairingTone.WARNING)
         is PairingState.Failed -> PairingView(PairingText.FAILED_TITLE, PairingText.FAILED_DETAIL,
             button = PairingText.BUTTON_RETRY)
     }

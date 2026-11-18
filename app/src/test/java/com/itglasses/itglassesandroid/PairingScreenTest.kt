@@ -34,16 +34,18 @@ class PairingScreenTest {
     }
 
     @Test fun registeringTextsDependOnTheReason() {
-        assertEquals(PairingView(PairingText.REGISTERING_TITLE, PairingText.REGISTERING_DETAIL), view(PairingState.Registering()))
-        assertEquals(PairingView(PairingText.REGISTERING_TITLE, PairingText.REGISTERING_DETAIL),
+        val warning = PairingTone.WARNING
+        assertEquals(PairingView(PairingText.REGISTERING_TITLE, PairingText.REGISTERING_DETAIL, tone = warning),
+            view(PairingState.Registering()))
+        assertEquals(PairingView(PairingText.REGISTERING_TITLE, PairingText.REGISTERING_DETAIL, tone = warning),
             view(PairingState.Registering(Reason.REQUESTED)))
-        assertEquals(PairingView(PairingText.EXPIRED_TITLE), view(PairingState.Registering(Reason.EXPIRED)))
-        assertEquals(PairingView(PairingText.REMOVED_TITLE), view(PairingState.Registering(Reason.REMOVED)))
+        assertEquals(PairingView(PairingText.EXPIRED_TITLE, tone = warning), view(PairingState.Registering(Reason.EXPIRED)))
+        assertEquals(PairingView(PairingText.REMOVED_TITLE, tone = warning), view(PairingState.Registering(Reason.REMOVED)))
     }
 
     @Test fun connectedShowsTheModelOrAGenericText() {
-        assertEquals(PairingView(PairingText.CONNECTED_TITLE, PairingText.CONNECTED_DETAIL, "Samsung SM-S911B", canChat = true),
-            view(PairingState.Connected))
+        assertEquals(PairingView(PairingText.CONNECTED_TITLE, PairingText.CONNECTED_DETAIL, "Samsung SM-S911B", canChat = true,
+            tone = PairingTone.ACCENT, pulse = true), view(PairingState.Connected))
         assertEquals(PairingText.CONNECTED_DETAIL_UNKNOWN, view(PairingState.Connected, model = null).detail)
     }
 
@@ -59,9 +61,9 @@ class PairingScreenTest {
     }
 
     @Test fun waitsShowTheirSeconds() {
-        assertEquals(PairingView(PairingText.OFFLINE_TITLE, PairingText.OFFLINE_DETAIL, "20", button = PairingText.BUTTON_RETRY),
-            view(PairingState.Offline(20, 3, POLL, PairingState.Registering())))
-        assertEquals(PairingView(PairingText.RATE_LIMITED_TITLE, PairingText.RATE_LIMITED_DETAIL, "42"),
+        assertEquals(PairingView(PairingText.OFFLINE_TITLE, PairingText.OFFLINE_DETAIL, "20", button = PairingText.BUTTON_RETRY,
+            tone = PairingTone.WARNING), view(PairingState.Offline(20, 3, POLL, PairingState.Registering())))
+        assertEquals(PairingView(PairingText.RATE_LIMITED_TITLE, PairingText.RATE_LIMITED_DETAIL, "42", tone = PairingTone.WARNING),
             view(PairingState.RateLimited(42, REGISTER, PairingState.Registering())))
     }
 
@@ -85,5 +87,28 @@ class PairingScreenTest {
     @Test fun apkWithoutOriginKeepsSharedTokenMode() {
         assertEquals(PairingView(detail = PairingText.UNCONFIGURED_DETAIL, sharedTokenMode = true, canChat = true),
             view(PairingState.Unconfigured))
+    }
+
+    @Test fun toneAndPulseFollowTheApprovedTable() {
+        val expected = mapOf<PairingState, Pair<PairingTone, Boolean>>(
+            PairingState.Connected to (PairingTone.ACCENT to true),
+            PairingState.Pending("482913", expiresAt) to (PairingTone.WARNING to true),
+            PairingState.Registering() to (PairingTone.WARNING to false),
+            PairingState.Registering(Reason.EXPIRED) to (PairingTone.WARNING to false),
+            PairingState.Registering(Reason.REMOVED) to (PairingTone.WARNING to false),
+            PairingState.Registering(Reason.REQUESTED) to (PairingTone.WARNING to false),
+            PairingState.Offline(20, 3, POLL, PairingState.Registering()) to (PairingTone.WARNING to false),
+            PairingState.RateLimited(42, REGISTER, PairingState.Registering()) to (PairingTone.WARNING to false),
+            PairingState.ClockMismatch(POLL) to (PairingTone.WARNING to false),
+            PairingState.Blocked to (PairingTone.DANGER to false),
+            PairingState.Denied to (PairingTone.DANGER to false),
+            PairingState.Unconfigured to (PairingTone.NEUTRAL to false),
+            PairingState.CertificateRejected(POLL) to (PairingTone.NEUTRAL to false),
+            PairingState.Failed(POLL) to (PairingTone.NEUTRAL to false),
+        )
+        for ((state, toneAndPulse) in expected) {
+            val shown = view(state)
+            assertEquals(state.toString(), toneAndPulse, shown.tone to shown.pulse)
+        }
     }
 }
