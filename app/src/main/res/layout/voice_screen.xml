@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Stage B2: full voice screen. Added on top of android.R.id.content by VoiceScreen (pairing mode only). -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/voice_screen"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/itg_background"
+    android:clickable="true"
+    android:focusable="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <!-- At most 260 x 300 dp; shrinks on short screens so the buttons always fit (VoiceShapes.scale). -->
+        <com.itglasses.itglassesandroid.VoiceVisualizer
+            android:id="@+id/voice_visualizer"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:importantForAccessibility="no"/>
+
+        <TextView
+            android:id="@+id/tv_voice_state"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:accessibilityLiveRegion="polite"
+            android:text="@string/voice_screen_listening"
+            android:textColor="@color/itg_text_primary"
+            android:textSize="20sp"/>
+
+        <TextView
+            android:id="@+id/tv_voice_seconds"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="@color/itg_text_secondary"
+            android:textSize="14sp"/>
+
+        <TextView
+            android:id="@+id/tv_voice_hint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:gravity="center"
+            android:text="@string/voice_screen_hint"
+            android:textColor="@color/itg_text_secondary"
+            android:textSize="12sp"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_voice_stop"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:minHeight="56dp"
+            android:text="@string/voice_screen_stop"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_voice_cancel"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:text="@string/voice_screen_cancel"
+            android:textColor="@color/itg_text_secondary"/>
+    </LinearLayout>
+</FrameLayout>

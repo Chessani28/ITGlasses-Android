@@ -28,6 +28,13 @@ class ChatEmptyTest {
         assertFalse(log.isEmpty)
     }
 
+    @Test fun aNoticeHidesTheWelcomeLikeAMessage() {
+        val log = ChatLog()
+        log.notice("Permiso de micrófono denegado.")
+        assertFalse(log.isEmpty)
+        assertFalse(ChatEmpty.visible(pairingMode = true, connected = true, logEmpty = log.isEmpty))
+    }
+
     @Test fun welcomeTextsAreTheApprovedOnesAndUsed() {
         val strings = ModuleFiles.elements(ModuleFiles.xml("src/main/res/values/strings.xml"), "string")
             .associate { it.getAttribute("name") to it.textContent }

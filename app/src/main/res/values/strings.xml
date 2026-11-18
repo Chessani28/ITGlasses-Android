@@ -106,4 +106,10 @@
     <!-- Bienvenida en la zona del chat: solo Conectado y antes del primer mensaje. -->
     <string name="chat_empty_title">Hola, soy tu asistente de ITGlasses</string>
     <string name="chat_empty_subtitle">Escribe una pregunta sobre tus equipos o usa la voz.</string>
+    <!-- Pantalla de voz (etapa B2, solo modo emparejamiento). -->
+    <string name="voice_screen_listening">Escuchando…</string>
+    <string name="voice_screen_seconds">%1$d s</string>
+    <string name="voice_screen_stop">Detener y enviar</string>
+    <string name="voice_screen_cancel">Cancelar</string>
+    <string name="voice_screen_hint">Toca Detener y enviar cuando termines.</string>
 </resources>

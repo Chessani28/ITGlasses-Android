@@ -9,6 +9,7 @@ import android.media.AudioRecord
 import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.os.Bundle
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -97,7 +98,14 @@ class MainActivity : AppCompatActivity() {
     private var recordingThread: Thread? = null
     private val recordedPcm = ByteArrayOutputStream()
     private var recordingStartMs = 0L
-    private val MAX_DURATION_MS = 30_000L
+    // Stage B2 (pairing mode): full voice screen with the real level; the 30 s limit lives in VoiceTiming.
+    private val voiceFlow = VoiceFlow()
+    private val voiceMeter = VoiceMeter()
+    private val voiceScreen by lazy { VoiceScreen(this, binding.root, onStop = { stopVoice() }, onCancel = { cancelRecording() }) }
+    /** Back = "Cancelar" only while the voice screen is open. */
+    private val voiceBack = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() = cancelRecording()
+    }
 
     // Voice pipeline processing state. Guards against duplicate submissions while a
     // recording flows through transcribe → Ollama → Piper → playback.
@@ -128,6 +136,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Leaving the app (or rotating) while listening cancels: nothing is sent. */
+    override fun onStop() {
+        if (voiceFlow.screenOpen) cancelRecording()
+        super.onStop()
+    }
+
     override fun onDestroy() {
         if (::wearablesIntegration.isInitialized) wearablesIntegration.onDestroy()
         super.onDestroy()
@@ -146,9 +160,10 @@ class MainActivity : AppCompatActivity() {
             if (granted) {
                 startRecording()
             } else {
-                updateStatus(getString(R.string.voice_mic_denied))
+                voiceStartFailed(getString(R.string.voice_mic_denied))
             }
         }
+        onBackPressedDispatcher.addCallback(this, voiceBack)
         activeToken = BackendConfiguration.getStoredToken(this)
         val initialUrl = BackendConfiguration.getBaseUrl(this)
         binding.tvBackendUrl.text = initialUrl?.let { getString(R.string.backend_url, it) }
@@ -481,11 +496,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun startRecording() {
         if (isRecording) return
+        if (pairing.configured && voiceFlow.busy) return  // A voice question is still on its way.
         if (ContextCompat.checkSelfPermission(
             this,
             Manifest.permission.RECORD_AUDIO
         ) != PackageManager.PERMISSION_GRANTED) {
-            updateStatus(getString(R.string.voice_mic_denied))
+            voiceStartFailed(getString(R.string.voice_mic_denied))
             return
         }
 
@@ -494,7 +510,7 @@ class MainActivity : AppCompatActivity() {
         val audioFormat = AudioFormat.ENCODING_PCM_16BIT
         val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
         if (bufferSize <= 0) {
-            updateStatus(getString(R.string.voice_mic_unsupported))
+            voiceStartFailed(getString(R.string.voice_mic_unsupported))
             return
         }
 
@@ -506,18 +522,37 @@ class MainActivity : AppCompatActivity() {
             bufferSize
         )
         if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
-            updateStatus(getString(R.string.voice_mic_unavailable))
+            voiceStartFailed(getString(R.string.voice_mic_unavailable))
             audioRecord?.release()
             audioRecord = null
             return
         }
 
         recordedPcm.reset()
+        voiceMeter.reset()
+        // The voice screen opens only once the microphone is really recording.
+        val started = try {
+            audioRecord?.startRecording()
+            audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING
+        } catch (e: IllegalStateException) {
+            false
+        }
+        if (!started) {
+            voiceStartFailed(getString(R.string.voice_mic_unavailable))
+            audioRecord?.release()
+            audioRecord = null
+            return
+        }
         isRecording = true
         recordingStartMs = System.currentTimeMillis()
-        binding.btnVoice.text = getString(R.string.voice_button_stop)
-        updateStatus(getString(R.string.voice_state_recording, 0))
-        audioRecord?.startRecording()
+        if (pairing.configured) {
+            voiceFlow.on(VoiceEvent.START)
+            voiceScreen.show(voiceMeter)
+            voiceBack.isEnabled = true
+        } else {
+            binding.btnVoice.text = getString(R.string.voice_button_stop)
+            updateStatus(getString(R.string.voice_state_recording, 0))
+        }
 
         recordingThread = Thread {
             val buffer = ShortArray(bufferSize / 2)
@@ -525,6 +560,7 @@ class MainActivity : AppCompatActivity() {
             while (isRecording) {
                 val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
                 if (read > 0) {
+                    voiceMeter.onSamples(buffer, read)  // Level for the voice screen; no allocation.
                     val bb = ByteBuffer.allocate(read * 2).order(ByteOrder.LITTLE_ENDIAN)
                     for (i in 0 until read) bb.putShort(buffer[i])
                     synchronized(recordedPcm) {
@@ -535,24 +571,70 @@ class MainActivity : AppCompatActivity() {
                 val now = System.currentTimeMillis()
                 val elapsed = now - recordingStartMs
 
-                // Maximum recording duration of 30 seconds: stop and save automatically.
-                if (elapsed >= MAX_DURATION_MS) {
+                // Maximum recording duration of 30 seconds: stop and send, exactly like "Detener y enviar".
+                if (VoiceTiming.reachedMax(elapsed)) {
                     isRecording = false
                     runOnUiThread {
+                        // After a cancel STOP is refused and finishRecording finds no AudioRecord: nothing is sent.
+                        if (voiceFlow.on(VoiceEvent.STOP)) closeVoiceScreen()
                         binding.btnVoice.text = getString(R.string.voice_button_start)
                         finishRecording()
                     }
                     break
                 }
 
-                // Recording state and duration display, updated once per second.
+                // Duration display, updated once per second: the voice screen counter, or the status line.
                 if (now - lastStatusMs >= 1000) {
                     lastStatusMs = now
-                    runOnUiThread { updateStatus(getString(R.string.voice_state_recording, (elapsed / 1000).toInt())) }
+                    val seconds = VoiceTiming.seconds(elapsed)
+                    runOnUiThread {
+                        if (pairing.configured) voiceScreen.seconds(seconds)
+                        else updateStatus(getString(R.string.voice_state_recording, seconds))
+                    }
                 }
             }
         }
         recordingThread?.start()
+    }
+
+    /** "Detener y enviar" (UI thread): the screen closes and the recording goes on as before. */
+    private fun stopVoice() {
+        if (!voiceFlow.on(VoiceEvent.STOP)) return
+        closeVoiceScreen()
+        stopRecording()
+    }
+
+    /** "Cancelar", Back or onStop while listening: stop the microphone and discard the audio. Nothing is sent. */
+    private fun cancelRecording() {
+        if (!voiceFlow.on(VoiceEvent.CANCEL)) return
+        closeVoiceScreen()
+        isRecording = false
+        recordingThread?.join(1000)
+        recordingThread = null
+        try { audioRecord?.stop() } catch (_: IllegalStateException) { }
+        audioRecord?.release()
+        audioRecord = null
+        synchronized(recordedPcm) { recordedPcm.reset() }
+        voiceMeter.reset()
+        binding.btnVoice.text = getString(R.string.voice_button_start)
+    }
+
+    private fun closeVoiceScreen() {
+        voiceBack.isEnabled = false
+        voiceScreen.hide(binding.btnVoice)
+    }
+
+    /**
+     * The microphone could not start: the voice screen never opens. Pairing mode: a notice in the conversation
+     * (it hides the welcome like a message does); shared-token mode: the status line, as before.
+     */
+    private fun voiceStartFailed(text: String) {
+        if (!pairing.configured) {
+            updateStatus(text)
+            return
+        }
+        chatBubbles.apply(chatLog.notice(text))
+        renderChatEmpty(pairingController.state.value == PairingState.Connected)
     }
 
     private fun stopRecording() {
@@ -573,6 +655,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnVoice.text = getString(R.string.voice_button_start)
         val pcm = synchronized(recordedPcm) { recordedPcm.toByteArray() }
         if (pcm.isEmpty()) {
+            voiceFlow.on(VoiceEvent.FAILED)
             updateStatus(getString(R.string.voice_recording_empty))
             return
         }
@@ -592,6 +675,7 @@ class MainActivity : AppCompatActivity() {
             setState(UiState.Transcribing)
             runVoicePipeline(wav)
         } catch (e: Exception) {
+            voiceFlow.on(VoiceEvent.FAILED)
             updateStatus(getString(R.string.voice_save_failed))
             isProcessing = false
             binding.btnVoice.isEnabled = voiceAllowed()
@@ -613,6 +697,7 @@ class MainActivity : AppCompatActivity() {
 
                 if (transcript.text.isBlank()) {
                     runOnUiThread {
+                        voiceFlow.on(VoiceEvent.NO_SPEECH)
                         binding.tvTranscription.text = getString(R.string.transcription_empty)
                         setState(UiState.Ready)
                         updateStatus(getString(R.string.transcription_empty))
@@ -624,6 +709,7 @@ class MainActivity : AppCompatActivity() {
                 // the backend requests clarification.
                 if (transcript.needsClarification) {
                     runOnUiThread {
+                        voiceFlow.on(VoiceEvent.CLARIFICATION)
                         binding.tvTranscription.text = transcript.clarification
                         setState(UiState.Ready)
                         updateStatus(getString(R.string.voice_clarification))
@@ -632,9 +718,13 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 // 2. Ollama chat.
-                runOnUiThread { setState(UiState.Thinking) }
+                runOnUiThread {
+                    voiceFlow.on(VoiceEvent.TRANSCRIBED)
+                    setState(UiState.Thinking)
+                }
                 val answer = sendToOllama(transcript.text)
                 runOnUiThread {
+                    voiceFlow.on(VoiceEvent.ANSWERED)
                     binding.tvAiResponse.text = answer
                     updateStatus(getString(R.string.voice_answer_received))
                 }
@@ -651,6 +741,7 @@ class MainActivity : AppCompatActivity() {
                 if (pairing.configured) {
                     val outcome = callErrors.describe(e)  // A CancellationException is rethrown: nothing is shown.
                     runOnUiThread {
+                        voiceFlow.on(VoiceEvent.FAILED)
                         val text = callFailureText(outcome)
                         binding.tvAiResponse.text = text
                         setState(UiState.Error)
@@ -755,6 +846,7 @@ class MainActivity : AppCompatActivity() {
     private fun playAudio(wav: ByteArray) {
         if (wav.isEmpty()) {
             runOnUiThread {
+                voiceFlow.on(VoiceEvent.NO_AUDIO)
                 setState(UiState.Ready)
                 updateStatus(getString(R.string.voice_no_audio))
             }
@@ -773,16 +865,19 @@ class MainActivity : AppCompatActivity() {
                 )
                 setDataSource(file.absolutePath)
                 setOnPreparedListener { mp ->
+                    voiceFlow.on(VoiceEvent.AUDIO_READY)
                     mp.start()
                     setState(UiState.Speaking)
                     updateStatus(getString(R.string.voice_playing))
                 }
                 setOnCompletionListener {
+                    voiceFlow.on(VoiceEvent.PLAYBACK_DONE)
                     releaseMediaPlayer()
                     setState(UiState.Ready)
                     updateStatus(getString(R.string.voice_playback_done))
                 }
                 setOnErrorListener { _, _, _ ->
+                    voiceFlow.on(VoiceEvent.FAILED)
                     releaseMediaPlayer()
                     setState(UiState.Error)
                     updateStatus(getString(R.string.voice_playback_failed))
