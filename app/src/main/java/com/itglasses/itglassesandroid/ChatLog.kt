@@ -4,13 +4,23 @@ package com.itglasses.itglassesandroid
 internal sealed class ChatEntry {
     abstract val id: Long
 
-    enum class Status { SENDING, SENT, FAILED }
+    enum class Status {
+        SENDING, SENT, FAILED,
+        /** Voice: provisional bubble with no text yet ("Transcribiendo"). */
+        TRANSCRIBING,
+    }
+
+    /** Label of the waiting bubble: "Generando respuesta" (typed) or "Pensando" (voice). */
+    enum class Waiting { GENERATING, THINKING }
+
+    /** Voice answer: "Preparando la voz…" or "Hablando…" under the bubble; null when there is no label. */
+    enum class Speech { PREPARING, SPEAKING }
 
     data class User(override val id: Long, val text: String, val status: Status) : ChatEntry()
-    data class Assistant(override val id: Long, val text: String) : ChatEntry()
+    data class Assistant(override val id: Long, val text: String, val speech: Speech? = null) : ChatEntry()
     data class Notice(override val id: Long, val text: String) : ChatEntry()
-    /** "Generando respuesta" while the answer to message [forMessage] is pending. */
-    data class Typing(override val id: Long, val forMessage: Long) : ChatEntry()
+    /** Waiting bubble while the answer to message [forMessage] is pending. */
+    data class Typing(override val id: Long, val forMessage: Long, val waiting: Waiting = Waiting.GENERATING) : ChatEntry()
     /** Provisional "Comprobando el estado del dispositivo…" after a 403; replaced or removed when the check ends. */
     data class Checking(override val id: Long, val forMessage: Long) : ChatEntry()
 }
@@ -63,6 +73,92 @@ internal class ChatLog(private val limit: Int = 100) {
         val removed = removeAll { it is ChatEntry.Checking }
         if (removed.isEmpty()) return ChatChange()
         return finish(listOfNotNull(notice?.let { ChatEntry.Notice(nextId++, it) }), removed)
+    }
+
+    // ---- Voice (stage B). The Activity resolves every text; nothing here reads bodies or exceptions. ----
+
+    /** "Detener y enviar": provisional bubble on the right with "Transcribiendo". Drops a pending "Comprobando". */
+    fun voiceStarted(): Pair<Long, ChatChange> {
+        val removed = removeAll { it is ChatEntry.Checking }
+        val user = ChatEntry.User(nextId++, "", ChatEntry.Status.TRANSCRIBING)
+        return user.id to finish(listOf(user), removed)
+    }
+
+    /** The provisional bubble gets the recognised text, and "Pensando" waits for the answer. */
+    fun voiceTranscribed(message: Long, text: String): ChatChange {
+        val updated = replaceUser(message) { it.copy(text = text, status = ChatEntry.Status.SENDING) }
+        if (updated.isEmpty()) return ChatChange()  // Dropped by the limit meanwhile.
+        return finish(listOf(ChatEntry.Typing(nextId++, message, ChatEntry.Waiting.THINKING)), emptyList(), updated)
+    }
+
+    /** "No se reconoció ninguna voz.": the provisional bubble goes away (nothing to mark) and [notice] is shown. */
+    fun voiceNoSpeech(message: Long, notice: String): ChatChange =
+        finish(listOf(ChatEntry.Notice(nextId++, notice)), removePlaceholder(message))
+
+    /** The backend asks to clarify: its text as an assistant answer, without "No enviado" and without voice. */
+    fun voiceClarification(message: Long, text: String): ChatChange =
+        finish(listOf(ChatEntry.Assistant(nextId++, text)), removePlaceholder(message))
+
+    /** Answer to a voice question: replaces "Pensando", marks the question sent, label "Preparando la voz…". */
+    fun voiceAnswered(message: Long, answer: String): Pair<Long, ChatChange> {
+        val removed = removeAll { it is ChatEntry.Typing && it.forMessage == message }
+        val assistant = ChatEntry.Assistant(nextId++, answer, ChatEntry.Speech.PREPARING)
+        return assistant.id to finish(listOf(assistant), removed, mark(message, ChatEntry.Status.SENT))
+    }
+
+    /** Label under a voice answer: "Hablando…", or none when playback ends. */
+    fun speech(answer: Long, speech: ChatEntry.Speech?): ChatChange {
+        val index = list.indexOfFirst { it is ChatEntry.Assistant && it.id == answer }
+        if (index < 0) return ChatChange()
+        val current = list[index] as ChatEntry.Assistant
+        if (current.speech == speech) return ChatChange()
+        val updated = current.copy(speech = speech)
+        list[index] = updated
+        return ChatChange(updated = listOf(updated))
+    }
+
+    /**
+     * A voice step failed; [notice] below (null when the pairing card already explains). "No enviado" only when
+     * the question itself did not reach the assistant (CHAT). TRANSCRIBE: there is no text, the provisional bubble
+     * goes away. SYNTHESIS / PLAYBACK: question and answer stay; only the voice label of [answer] goes away.
+     */
+    fun voiceFailed(message: Long, answer: Long?, step: VoiceStep, notice: String?): ChatChange =
+        voiceFailure(message, answer, step, listOfNotNull(notice?.let { ChatEntry.Notice(nextId++, it) }), dropCheck = false)
+
+    /** 403 in a voice step: as [voiceFailed], with the provisional "Comprobando…" until [resolveCheck]. */
+    fun voiceChecking(message: Long, answer: Long?, step: VoiceStep): ChatChange =
+        voiceFailure(message, answer, step, listOf(ChatEntry.Checking(nextId++, message)), dropCheck = true)
+
+    /** A notice on its own: microphone errors, empty recording, save failure, no audio, playback failure. */
+    fun notice(text: String): ChatChange = finish(listOf(ChatEntry.Notice(nextId++, text)), emptyList())
+
+    private fun voiceFailure(message: Long, answer: Long?, step: VoiceStep, added: List<ChatEntry>, dropCheck: Boolean): ChatChange {
+        val removed = mutableListOf<Long>()
+        if (dropCheck) removed += removeAll { it is ChatEntry.Checking }
+        val updated = when (step) {
+            VoiceStep.TRANSCRIBE -> {
+                removed += removePlaceholder(message)
+                emptyList()
+            }
+            VoiceStep.CHAT -> {
+                removed += removeAll { it is ChatEntry.Typing && it.forMessage == message }
+                mark(message, ChatEntry.Status.FAILED)
+            }
+            VoiceStep.SYNTHESIS, VoiceStep.PLAYBACK -> answer?.let { speech(it, null).updated }.orEmpty()
+        }
+        return finish(added, removed, updated)
+    }
+
+    /** Only the voice placeholder (still without text) is removed; a transcribed message stays. */
+    private fun removePlaceholder(message: Long): List<Long> =
+        removeAll { it is ChatEntry.User && it.id == message && it.status == ChatEntry.Status.TRANSCRIBING }
+
+    private fun replaceUser(message: Long, change: (ChatEntry.User) -> ChatEntry.User): List<ChatEntry> {
+        val index = list.indexOfFirst { it is ChatEntry.User && it.id == message }
+        if (index < 0) return emptyList()
+        val updated = change(list[index] as ChatEntry.User)
+        list[index] = updated
+        return listOf(updated)
     }
 
     private fun removeAll(predicate: (ChatEntry) -> Boolean): List<Long> {
