@@ -24,4 +24,16 @@ class VoiceWiringTest {
         val screen = ModuleFiles.file("src/main/java/com/itglasses/itglassesandroid/VoiceScreen.kt").readText()
         assertTrue(screen.contains("android.R.id.content"))
     }
+
+    @Test fun pairingModeVoiceGoesToTheConversation() {
+        assertTrue(activity.contains("binding.tvTranscription.visibility = android.view.View.GONE"))
+        assertTrue(activity.contains("binding.tvAiResponse.visibility = android.view.View.GONE"))
+        assertFalse("la voz ya no usa la línea de estado", activity.contains("showNotice("))
+        assertTrue(activity.contains("InputLock.of("))
+        for (call in listOf("chatLog.voiceStarted()", "chatLog.voiceNoSpeech(", "chatLog.voiceClarification(",
+                "chatLog.voiceTranscribed(", "chatLog.voiceAnswered(", "ChatEntry.Speech.SPEAKING", "VoiceFailures.apply(",
+                "VoiceStep.PLAYBACK")) {
+            assertTrue(call, activity.contains(call))
+        }
+    }
 }

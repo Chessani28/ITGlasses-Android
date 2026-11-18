@@ -7,10 +7,12 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
 
 /**
- * Bubble views for ChatLog (stage C). Applies each ChatChange: removes, updates in place, adds at the end with a
- * short fade, then scrolls to the last message. Android-only: verified on the phone.
+ * Bubble views for ChatLog (stage C, voice in stage B3). Applies each ChatChange: removes, updates in place (or
+ * rebuilds the row in its own position when what is drawn changes), adds at the end with a short fade, then
+ * scrolls to the last message. Android-only: verified on the phone.
  */
 internal class ChatBubbles(private val container: LinearLayout, private val scroll: ScrollView) {
     private class Row(
@@ -20,15 +22,23 @@ internal class ChatBubbles(private val container: LinearLayout, private val scro
         val dots: TypingDots? = null,
         /** Pixels taken by the avatar beside the bubble (0 without avatar). */
         val reserved: Int = 0,
+        /** Voice answer: "Preparando la voz…" / "Hablando…" under the bubble. */
+        val speech: SpeechLabel? = null,
+        /** Voice placeholder: rebuilt in place once its text arrives. */
+        val placeholder: Boolean = false,
     )
+
+    private class SpeechLabel(val row: View, val text: TextView, val pulse: Pulse) {
+        var speaking = false
+    }
 
     private val context = container.context
     private val rows = mutableMapOf<Long, Row>()
     private val density = context.resources.displayMetrics.density
     private fun dp(value: Int) = (value * density).toInt()
     private fun color(id: Int) = ContextCompat.getColor(context, id)
-    /** Avatar of 28 dp plus 8 dp of space: what a bubble with avatar gives up (AVATAR_DP + AVATAR_GAP_DP). */
-    private val avatarReserved get() = dp(AVATAR_DP + AVATAR_GAP_DP)
+    /** Avatar of 28 dp plus 8 dp of space (ChatAvatar.RESERVED_DP): what a bubble with avatar gives up. */
+    private val avatarReserved get() = dp(ChatAvatar.RESERVED_DP)
 
     /** 80 % of the container's real width, minus [reserved]; the screen width only before the first layout. */
     private fun maxBubbleWidth(reserved: Int = 0) = BubbleWidth.max(
@@ -51,13 +61,18 @@ internal class ChatBubbles(private val container: LinearLayout, private val scro
 
     fun apply(change: ChatChange) {
         for (id in change.removed) rows.remove(id)?.let { row ->
-            row.dots?.stop()
+            stop(row)
             container.removeView(row.view)
         }
         for (entry in change.updated) {
-            val user = entry as? ChatEntry.User ?: continue
-            rows[user.id]?.notSent?.visibility =
-                if (user.status == ChatEntry.Status.FAILED) View.VISIBLE else View.GONE
+            val row = rows[entry.id] ?: continue
+            when (entry) {
+                is ChatEntry.User ->
+                    if (row.placeholder && entry.status != ChatEntry.Status.TRANSCRIBING) rebuild(entry, row)
+                    else row.notSent?.visibility = if (entry.status == ChatEntry.Status.FAILED) View.VISIBLE else View.GONE
+                is ChatEntry.Assistant -> row.speech?.let { show(it, entry.speech) }
+                else -> Unit
+            }
         }
         for (entry in change.added) {
             val row = build(entry)
@@ -72,12 +87,41 @@ internal class ChatBubbles(private val container: LinearLayout, private val scro
         }
     }
 
-    /** Looping dots only in the foreground. */
-    fun pauseAnimations() = rows.values.forEach { it.dots?.stop() }
-    fun resumeAnimations() = rows.values.forEach { it.dots?.start() }
+    /** Looping dots and the speaker's pulse only in the foreground. */
+    fun pauseAnimations() = rows.values.forEach { row ->
+        row.dots?.stop()
+        row.speech?.pulse?.stop()
+    }
+
+    fun resumeAnimations() = rows.values.forEach { row ->
+        row.dots?.start()
+        row.speech?.let { if (it.speaking) it.pulse.start() }
+    }
+
+    /** Same position, new views: the placeholder becomes the message bubble. */
+    private fun rebuild(entry: ChatEntry, old: Row) {
+        val index = container.indexOfChild(old.view)
+        stop(old)
+        container.removeView(old.view)
+        val row = build(entry)
+        rows[entry.id] = row
+        if (index >= 0) container.addView(row.view, index) else container.addView(row.view)
+        row.dots?.start()
+        fadeIn(row.view)
+    }
+
+    private fun stop(row: Row) {
+        row.dots?.stop()
+        row.speech?.pulse?.stop()
+    }
 
     private fun build(entry: ChatEntry): Row = when (entry) {
-        is ChatEntry.User -> {
+        is ChatEntry.User -> if (entry.status == ChatEntry.Status.TRANSCRIBING) {
+            // On the user's green bubble the label uses text_primary: text_secondary would be below 4.5:1.
+            waiting(Gravity.END, R.drawable.bubble_user, context.getString(R.string.chat_transcribing_label),
+                context.getString(R.string.voice_state_transcribing), avatar = ChatAvatar.has(entry), textColorRes = R.color.itg_text_primary)
+                .let { Row(it.view, it.bubble, dots = it.dots, placeholder = true) }
+        } else {
             val bubble = text(entry.text, R.color.itg_text_primary, R.drawable.bubble_user, selectable = true)
             val notSent = label(context.getString(R.string.chat_not_sent)).apply {
                 visibility = if (entry.status == ChatEntry.Status.FAILED) View.VISIBLE else View.GONE
@@ -85,34 +129,48 @@ internal class ChatBubbles(private val container: LinearLayout, private val scro
             Row(column(Gravity.END, bubble, notSent), bubble = bubble, notSent = notSent)
         }
         is ChatEntry.Assistant -> {
+            val reserved = dp(ChatAvatar.reservedDp(entry))
             val bubble = text(entry.text, R.color.itg_text_primary, R.drawable.bubble_assistant, selectable = true,
-                reserved = avatarReserved)
-            Row(column(Gravity.START, withAvatar(bubble)), bubble = bubble, reserved = avatarReserved)
+                reserved = reserved)
+            val speech = speechLabel()
+            show(speech, entry.speech)
+            Row(column(Gravity.START, withAvatar(bubble), speech.row), bubble = bubble, reserved = reserved, speech = speech)
         }
         is ChatEntry.Notice -> {
             val bubble = text(entry.text, R.color.itg_warning, R.drawable.bubble_notice)
             Row(column(Gravity.CENTER_HORIZONTAL, bubble), bubble = bubble)
         }
-        is ChatEntry.Typing -> waiting(Gravity.START, R.drawable.bubble_assistant,
-            context.getString(R.string.chat_generating_label), context.getString(R.string.call_generating), avatar = true)
+        is ChatEntry.Typing -> when (entry.waiting) {
+            ChatEntry.Waiting.GENERATING -> waiting(Gravity.START, R.drawable.bubble_assistant,
+                context.getString(R.string.chat_generating_label), context.getString(R.string.call_generating), avatar = ChatAvatar.has(entry))
+            ChatEntry.Waiting.THINKING -> waiting(Gravity.START, R.drawable.bubble_assistant,
+                context.getString(R.string.chat_thinking_label), context.getString(R.string.voice_state_thinking), avatar = ChatAvatar.has(entry))
+        }
         is ChatEntry.Checking -> {
             val full = context.getString(R.string.pairing_call_checking)
-            waiting(Gravity.CENTER_HORIZONTAL, null, full.removeSuffix("…"), full, avatar = false)
+            waiting(Gravity.CENTER_HORIZONTAL, null, full.removeSuffix("…"), full, avatar = ChatAvatar.has(entry))
         }
     }
 
     /** Label + three blinking dots; with animations off, the static text with its "…". */
-    private fun waiting(align: Int, bubbleBackground: Int?, label: String, static: String, avatar: Boolean): Row {
+    private fun waiting(
+        align: Int,
+        bubbleBackground: Int?,
+        label: String,
+        static: String,
+        avatar: Boolean,
+        textColorRes: Int = R.color.itg_text_secondary,
+    ): Row {
         val reserved = if (avatar) avatarReserved else 0
         fun framed(view: View) = if (avatar) withAvatar(view) else view
         if (!Motion.enabled(context)) {
-            val bubble = text(static, R.color.itg_text_secondary, bubbleBackground, reserved = reserved)
+            val bubble = text(static, textColorRes, bubbleBackground, reserved = reserved)
             return Row(column(align, framed(bubble)), bubble = bubble, reserved = reserved)
         }
         val dots = List(3) {
             View(context).apply {
                 setBackgroundResource(R.drawable.status_dot)
-                backgroundTintList = android.content.res.ColorStateList.valueOf(color(R.color.itg_text_secondary))
+                backgroundTintList = android.content.res.ColorStateList.valueOf(color(textColorRes))
                 layoutParams = LinearLayout.LayoutParams(dp(6), dp(6)).apply { marginStart = dp(4) }
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             }
@@ -125,12 +183,46 @@ internal class ChatBubbles(private val container: LinearLayout, private val scro
             contentDescription = static
             addView(TextView(context).apply {
                 text = label
-                setTextColor(color(R.color.itg_text_secondary))
+                setTextColor(color(textColorRes))
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             })
             dots.forEach { addView(it) }
         }
         return Row(column(align, framed(line)), dots = TypingDots(dots), reserved = reserved)
+    }
+
+    /**
+     * Small speaker + "Preparando la voz…" / "Hablando…" under a voice answer, aligned with the bubble (past the
+     * avatar). A polite live region: TalkBack announces the change without cutting the answer.
+     */
+    private fun speechLabel(): SpeechLabel {
+        val icon = ImageView(context).apply {
+            setImageResource(R.drawable.ic_speaker)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        val text = label("").apply {
+            ViewCompat.setAccessibilityLiveRegion(this, ViewCompat.ACCESSIBILITY_LIVE_REGION_POLITE)
+        }
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(avatarReserved, dp(2), 0, 0)
+            addView(icon, LinearLayout.LayoutParams(dp(SPEAKER_DP), dp(SPEAKER_DP)))
+            addView(text)
+        }
+        return SpeechLabel(row, text, Pulse(icon))
+    }
+
+    /** Gentle pulse while speaking (still with animations off: Pulse handles that); hidden without a label. */
+    private fun show(label: SpeechLabel, speech: ChatEntry.Speech?) {
+        label.speaking = speech == ChatEntry.Speech.SPEAKING
+        when (speech) {
+            null -> label.row.visibility = View.GONE
+            ChatEntry.Speech.PREPARING -> label.text.text = context.getString(R.string.voice_state_synthesizing)
+            ChatEntry.Speech.SPEAKING -> label.text.text = context.getString(R.string.voice_state_speaking)
+        }
+        if (speech != null) label.row.visibility = View.VISIBLE
+        if (label.speaking) label.pulse.start() else label.pulse.stop()
     }
 
     /** Avatar (decorative, not read by TalkBack) at the bottom left of the bubble, 8 dp apart. */
@@ -143,7 +235,7 @@ internal class ChatBubbles(private val container: LinearLayout, private val scro
             val inset = dp(5)
             setPadding(inset, inset, inset, inset)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }, LinearLayout.LayoutParams(dp(AVATAR_DP), dp(AVATAR_DP)).apply { marginEnd = dp(AVATAR_GAP_DP) })
+        }, LinearLayout.LayoutParams(dp(ChatAvatar.SIZE_DP), dp(ChatAvatar.SIZE_DP)).apply { marginEnd = dp(ChatAvatar.GAP_DP) })
         addView(bubble, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
     }
 
@@ -179,7 +271,6 @@ internal class ChatBubbles(private val container: LinearLayout, private val scro
     }
 
     private companion object {
-        const val AVATAR_DP = 28
-        const val AVATAR_GAP_DP = 8
+        const val SPEAKER_DP = 14
     }
 }

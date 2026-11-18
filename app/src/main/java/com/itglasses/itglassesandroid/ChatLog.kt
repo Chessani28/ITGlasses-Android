@@ -234,6 +234,21 @@ internal object BubbleWidth {
     }
 }
 
+/**
+ * Which conversation rows carry the assistant avatar and the space it takes from the 80 % limit: the answers and
+ * their waiting bubbles ("Generando respuesta", "Pensando"). Never the user's bubbles, notices or "Comprobando".
+ */
+internal object ChatAvatar {
+    const val SIZE_DP = 28
+    const val GAP_DP = 8
+    const val RESERVED_DP = SIZE_DP + GAP_DP
+
+    fun has(entry: ChatEntry): Boolean = entry is ChatEntry.Assistant || entry is ChatEntry.Typing
+
+    /** dp to give to BubbleWidth.max(reserved = …) once converted to pixels; 0 without avatar. */
+    fun reservedDp(entry: ChatEntry): Int = if (has(entry)) RESERVED_DP else 0
+}
+
 /** Welcome in the conversation area: pairing mode only, phone Connected, nothing sent yet. Voice does not hide it. */
 internal object ChatEmpty {
     fun visible(pairingMode: Boolean, connected: Boolean, logEmpty: Boolean): Boolean = pairingMode && connected && logEmpty

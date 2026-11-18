@@ -101,3 +101,40 @@ internal object VoiceTiming {
     /** At the limit recording stops on its own, exactly like "Detener y enviar". */
     fun reachedMax(elapsedMs: Long): Boolean = elapsedMs >= MAX_MS
 }
+
+/** A failed voice step applied to the conversation (stage B3): the same ChatFailures table as typed chat. */
+internal object VoiceFailures {
+    /** [text] resolves a WithNotice failure; 403 gives the provisional "Comprobando…" (resolved by the caller). */
+    fun apply(
+        log: ChatLog,
+        message: Long,
+        answer: Long?,
+        step: VoiceStep,
+        failure: ChatFailure,
+        text: (ChatFailure.WithNotice) -> String,
+    ): ChatChange = when (failure) {
+        ChatFailure.Check -> log.voiceChecking(message, answer, step)
+        ChatFailure.NotSentOnly -> log.voiceFailed(message, answer, step, null)
+        is ChatFailure.WithNotice -> log.voiceFailed(message, answer, step, text(failure))
+    }
+
+    /** The backend's clarification, or [fallback] ("Hace falta aclarar la pregunta.") when it is empty. */
+    fun clarification(text: String, fallback: String): String = text.trim().ifEmpty { fallback }
+}
+
+/** Which input is enabled (stage B3). Pure Kotlin. */
+internal data class InputState(val send: Boolean, val voice: Boolean)
+
+internal object InputLock {
+    /** Voice stages where a spoken question is still on its way: typed chat waits. */
+    private val asking = setOf(VoiceStage.LISTENING, VoiceStage.TRANSCRIBING, VoiceStage.THINKING, VoiceStage.SYNTHESIZING)
+
+    /**
+     * Typed chat and voice never overlap. While the answer is being spoken you can type; voice waits until the
+     * audio ends. [processing] covers the recording being saved and the pipeline's own busy states.
+     */
+    fun of(canChat: Boolean, chatInFlight: Boolean, voice: VoiceStage, processing: Boolean): InputState = InputState(
+        send = canChat && !chatInFlight && voice !in asking,
+        voice = canChat && !chatInFlight && voice !in asking && voice != VoiceStage.SPEAKING && !processing,
+    )
+}

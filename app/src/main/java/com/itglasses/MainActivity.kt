@@ -49,8 +49,6 @@ class MainActivity : AppCompatActivity() {
     }
     // Pairing mode: failed chat and voice calls -> fixed Spanish notices (never the exception or the body).
     private val callErrors = CallErrors()
-    private val notice = TransientNotice()
-    private var noticeJob: kotlinx.coroutines.Job? = null
     // Stage A: pairing card tone (dot and border colour) and the dot's pulse.
     private val pulse by lazy { Pulse(binding.statusDot) }
     private val dotColor by lazy {
@@ -102,6 +100,10 @@ class MainActivity : AppCompatActivity() {
     private val voiceFlow = VoiceFlow()
     private val voiceMeter = VoiceMeter()
     private val voiceScreen by lazy { VoiceScreen(this, binding.root, onStop = { stopVoice() }, onCancel = { cancelRecording() }) }
+    // Stage B3 (pairing mode): voice in the conversation; typed chat and voice never overlap (InputLock).
+    private var chatInFlight = false
+    private var voiceMessage = 0L
+    private var voiceAnswer: Long? = null
     /** Back = "Cancelar" only while the voice screen is open. */
     private val voiceBack = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() = cancelRecording()
@@ -121,8 +123,8 @@ class MainActivity : AppCompatActivity() {
     private fun setState(state: UiState) {
         uiState = state
         runOnUiThread {
-            val busy = state != UiState.Idle && state != UiState.Ready && state != UiState.Error
-            binding.btnVoice.isEnabled = !busy && voiceAllowed()
+            updateInputs()
+            if (pairing.configured) return@runOnUiThread  // Pairing mode: voice states live in the bubbles.
             binding.tvStatus.text = when (state) {
                 UiState.Recording -> getString(R.string.voice_state_recording, 0)
                 UiState.Transcribing -> getString(R.string.voice_state_transcribing)
@@ -208,6 +210,9 @@ class MainActivity : AppCompatActivity() {
             binding.tvStatus.text = null  // No "Loading..." in pairing mode: the card says how things stand.
             binding.chatMessages.visibility = android.view.View.VISIBLE
             binding.tvChatOutput.visibility = android.view.View.GONE
+            // Stage B3: voice goes into the conversation; these stay for shared-token mode only.
+            binding.tvTranscription.visibility = android.view.View.GONE
+            binding.tvAiResponse.visibility = android.view.View.GONE
             binding.btnPair.setOnClickListener { pairingController.onEvent(PairingEvent.UserRetry) }
             // Pairing runs only while the app is visible: repeatOnLifecycle cancels it on onStop.
             lifecycleScope.launch {
@@ -227,14 +232,8 @@ class MainActivity : AppCompatActivity() {
                     launch {
                         // Result of the status check after a 403 (drop: do not repeat an old one on resume).
                         pairingController.callCheck.drop(1).collect { check ->
-                            ChatFailures.resolution(check)?.let { resolution ->
-                                resolveChatCheck(resolution)
-                                // Voice shows "Comprobando…" in the status line: replace it without repeating the card.
-                                if (binding.tvStatus.text.toString() == pairingText(PairingText.CALL_CHECKING)) {
-                                    if (resolution == ChatCheckResolution.UNAVAILABLE) showNotice(pairingText(PairingText.FORBIDDEN_CALL))
-                                    else binding.tvStatus.text = null
-                                }
-                            }
+                            // Typed and voice "Comprobando…" are both bubbles now.
+                            ChatFailures.resolution(check)?.let { resolveChatCheck(it) }
                         }
                     }
                     launch {
@@ -255,8 +254,7 @@ class MainActivity : AppCompatActivity() {
         val legacy = if (view.sharedTokenMode) android.view.View.VISIBLE else android.view.View.GONE
         for (field in listOf(binding.etBackendUrl, binding.etApiToken, binding.btnConnect,
             binding.btnDisconnect, binding.tvBackendUrl)) field.visibility = legacy
-        binding.btnSend.isEnabled = view.canChat
-        binding.btnVoice.isEnabled = view.canChat && !isProcessing
+        updateInputs()
         showPairingText(binding.tvPairingTitle, view.title?.let { pairingText(it) })
         showPairingText(binding.tvPairingCode, view.code)
         binding.tvPairingCode.contentDescription = view.spokenCode?.let { pairingText(PairingText.CODE_SPOKEN, it) }
@@ -279,17 +277,38 @@ class MainActivity : AppCompatActivity() {
     /** Voice and Send only while Connected; always in shared-token mode (controller never created there). */
     private fun voiceAllowed(): Boolean = !pairing.configured || pairingController.state.value == PairingState.Connected
 
-    /** 403 with a pairing origin: wait for the controller's status check instead of guessing. */
-    private fun callCheckMessage(check: CallCheck): String = when (check) {
-        CallCheck.UNAVAILABLE -> pairingText(PairingText.FORBIDDEN_CALL)
-        CallCheck.RESOLVED -> PairingScreen.view(pairingController.state.value, 0L, null).title?.let { pairingText(it) }.orEmpty()
-        CallCheck.IDLE, CallCheck.CHECKING -> pairingText(PairingText.CALL_CHECKING)
+    /**
+     * Send and Voice. Pairing mode: only while Connected, never both questions at once (typing is allowed while
+     * the answer is spoken). Shared-token mode: as before (voice waits while busy, Send handled by sendMessage).
+     */
+    private fun updateInputs() {
+        val busy = isProcessing || (uiState != UiState.Idle && uiState != UiState.Ready && uiState != UiState.Error)
+        if (!pairing.configured) {
+            binding.btnVoice.isEnabled = !busy
+            return
+        }
+        val inputs = InputLock.of(voiceAllowed(), chatInFlight, voiceFlow.stage, busy)
+        binding.btnSend.isEnabled = inputs.send
+        binding.btnVoice.isEnabled = inputs.voice
     }
 
-    /** Text for a failed voice call in pairing mode; 403 waits for the controller's status check. */
-    private fun callFailureText(outcome: CallOutcome): String = when (outcome) {
-        CallOutcome.DeviceCheck -> callCheckMessage(pairingController.callCheck.value)
-        is CallOutcome.Notice -> callText(outcome.text, outcome.arg)
+    /** UI thread: a conversation change, then the welcome (any entry, message or notice, hides it). */
+    private fun showChange(change: ChatChange) {
+        chatBubbles.apply(change)
+        renderChatEmpty(pairingController.state.value == PairingState.Connected)
+    }
+
+    /** UI thread. Voice notice: a bubble in pairing mode, the status line in shared-token mode. */
+    private fun voiceNotice(text: String) {
+        if (pairing.configured) showChange(chatLog.notice(text)) else updateStatus(text)
+    }
+
+    /** UI thread. A failed voice step, by the same table as typed chat ("No enviado" only if the chat call failed). */
+    private fun showVoiceFailure(message: Long, step: VoiceStep, outcome: CallOutcome) {
+        val failure = ChatFailures.present(outcome)
+        showChange(VoiceFailures.apply(chatLog, message, voiceAnswer, step, failure) { callText(it.text, it.arg) })
+        // The check may already have ended (the collector only sees later changes).
+        if (failure == ChatFailure.Check) ChatFailures.resolution(pairingController.callCheck.value)?.let { resolveChatCheck(it) }
     }
 
     private fun callText(text: CallText, arg: String?): String =
@@ -315,20 +334,6 @@ class MainActivity : AppCompatActivity() {
     private fun resolveChatCheck(resolution: ChatCheckResolution) {
         val notice = if (resolution == ChatCheckResolution.UNAVAILABLE) pairingText(PairingText.FORBIDDEN_CALL) else null
         chatBubbles.apply(chatLog.resolveCheck(notice))
-    }
-
-    /**
-     * UI thread. Status-line notice for 8 s; a newer one replaces it and restarts the time. A network failure
-     * never touches the pairing card. The line is cleared only if it still shows this notice.
-     */
-    private fun showNotice(text: String) {
-        val ticket = notice.show(text)
-        binding.tvStatus.text = text
-        noticeJob?.cancel()
-        noticeJob = lifecycleScope.launch {
-            delay(notice.durationMs)
-            if (notice.expire(ticket) && binding.tvStatus.text.toString() == text) binding.tvStatus.text = null
-        }
     }
 
     private fun pairingText(text: PairingText, arg: String? = null): String =
@@ -418,9 +423,10 @@ class MainActivity : AppCompatActivity() {
         binding.btnSend.isEnabled = false
         val chatId = if (pairing.configured) {
             binding.etMessage.text?.clear()  // Empty even if sending fails: the text stays in its bubble.
+            chatInFlight = true
+            updateInputs()
             val (id, change) = chatLog.send(message)
-            renderChatEmpty(pairingController.state.value == PairingState.Connected)
-            chatBubbles.apply(change)
+            showChange(change)
             id
         } else {
             updateStatus("Generating response...")
@@ -458,7 +464,7 @@ class MainActivity : AppCompatActivity() {
                             binding.tvChatOutput.text = "${binding.tvChatOutput.text}\nError: HTTP ${response.code} ${responseBody ?: ""}"
                             updateStatus("Connected")
                         }
-                        binding.btnSend.isEnabled = voiceAllowed()
+                        chatFinished()
                     }
                 }
             } catch (e: Exception) {
@@ -466,7 +472,7 @@ class MainActivity : AppCompatActivity() {
                     val outcome = callErrors.describe(e)  // A CancellationException is rethrown: nothing is shown.
                     runOnUiThread {
                         showChatFailure(chatId, outcome)
-                        binding.btnSend.isEnabled = voiceAllowed()
+                        chatFinished()
                     }
                     return@launch
                 }
@@ -477,6 +483,12 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    /** UI thread: the typed question got its answer (or failed); voice may start again. */
+    private fun chatFinished() {
+        chatInFlight = false
+        if (pairing.configured) updateInputs() else binding.btnSend.isEnabled = voiceAllowed()
     }
 
     private fun toggleRecording() {
@@ -549,6 +561,7 @@ class MainActivity : AppCompatActivity() {
             voiceFlow.on(VoiceEvent.START)
             voiceScreen.show(voiceMeter)
             voiceBack.isEnabled = true
+            updateInputs()  // No typed question while listening.
         } else {
             binding.btnVoice.text = getString(R.string.voice_button_stop)
             updateStatus(getString(R.string.voice_state_recording, 0))
@@ -622,20 +635,14 @@ class MainActivity : AppCompatActivity() {
     private fun closeVoiceScreen() {
         voiceBack.isEnabled = false
         voiceScreen.hide(binding.btnVoice)
+        updateInputs()
     }
 
     /**
      * The microphone could not start: the voice screen never opens. Pairing mode: a notice in the conversation
      * (it hides the welcome like a message does); shared-token mode: the status line, as before.
      */
-    private fun voiceStartFailed(text: String) {
-        if (!pairing.configured) {
-            updateStatus(text)
-            return
-        }
-        chatBubbles.apply(chatLog.notice(text))
-        renderChatEmpty(pairingController.state.value == PairingState.Connected)
-    }
+    private fun voiceStartFailed(text: String) = voiceNotice(text)
 
     private fun stopRecording() {
         isRecording = false
@@ -656,29 +663,37 @@ class MainActivity : AppCompatActivity() {
         val pcm = synchronized(recordedPcm) { recordedPcm.toByteArray() }
         if (pcm.isEmpty()) {
             voiceFlow.on(VoiceEvent.FAILED)
-            updateStatus(getString(R.string.voice_recording_empty))
+            voiceNotice(getString(R.string.voice_recording_empty))  // No provisional bubble: nothing was recorded.
+            updateInputs()
             return
         }
 
-        updateStatus(getString(R.string.voice_saving))
+        if (pairing.configured) {
+            // Provisional bubble "Transcribiendo"; the first one also hides the welcome.
+            val (id, change) = chatLog.voiceStarted()
+            voiceMessage = id
+            voiceAnswer = null
+            showChange(change)
+        } else updateStatus(getString(R.string.voice_saving))
         val wav = pcmToWav(pcm, 16000, 1, 16)
         try {
             // Temporary private app storage (cache dir).
             val file = File(cacheDir, "recording.wav")
             FileOutputStream(file).use { it.write(wav) }
             val duration = pcm.size / (16000 * 2)
-            updateStatus(getString(R.string.voice_saved, duration))
+            if (!pairing.configured) updateStatus(getString(R.string.voice_saved, duration))
             // Run the full voice pipeline off the UI thread:
             // transcribe (Vosk) → Ollama chat → Piper synthesis → MediaPlayer playback.
             isProcessing = true
-            binding.btnVoice.isEnabled = false
             setState(UiState.Transcribing)
             runVoicePipeline(wav)
         } catch (e: Exception) {
             voiceFlow.on(VoiceEvent.FAILED)
-            updateStatus(getString(R.string.voice_save_failed))
+            if (pairing.configured) {
+                showChange(chatLog.voiceFailed(voiceMessage, null, VoiceStep.TRANSCRIBE, getString(R.string.voice_save_failed)))
+            } else updateStatus(getString(R.string.voice_save_failed))
             isProcessing = false
-            binding.btnVoice.isEnabled = voiceAllowed()
+            updateInputs()
         }
     }
 
@@ -687,20 +702,27 @@ class MainActivity : AppCompatActivity() {
     }
 
     // Full voice pipeline: transcribe → Ollama → Piper → playback.
-    // Runs entirely off the main UI thread on a single coroutine.
+    // Runs entirely off the main UI thread on a single coroutine. Pairing mode: every step is a conversation
+    // change (stage B3); shared-token mode: tv_transcription, tv_ai_response and the status line, as before.
     private fun runVoicePipeline(wav: ByteArray) {
+        val inChat = pairing.configured
+        val message = voiceMessage
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 // 1. Transcribe via Vosk.
                 val transcript = transcribeWavRaw(wav)
-                runOnUiThread { binding.tvTranscription.text = transcript.text }
+                if (!inChat) runOnUiThread { binding.tvTranscription.text = transcript.text }
 
                 if (transcript.text.isBlank()) {
                     runOnUiThread {
                         voiceFlow.on(VoiceEvent.NO_SPEECH)
-                        binding.tvTranscription.text = getString(R.string.transcription_empty)
+                        if (inChat) {
+                            showChange(chatLog.voiceNoSpeech(message, getString(R.string.transcription_empty)))
+                        } else {
+                            binding.tvTranscription.text = getString(R.string.transcription_empty)
+                            updateStatus(getString(R.string.transcription_empty))
+                        }
                         setState(UiState.Ready)
-                        updateStatus(getString(R.string.transcription_empty))
                     }
                     return@launch
                 }
@@ -710,9 +732,14 @@ class MainActivity : AppCompatActivity() {
                 if (transcript.needsClarification) {
                     runOnUiThread {
                         voiceFlow.on(VoiceEvent.CLARIFICATION)
-                        binding.tvTranscription.text = transcript.clarification
+                        if (inChat) {
+                            val text = VoiceFailures.clarification(transcript.clarification, getString(R.string.voice_clarification))
+                            showChange(chatLog.voiceClarification(message, text))
+                        } else {
+                            binding.tvTranscription.text = transcript.clarification
+                            updateStatus(getString(R.string.voice_clarification))
+                        }
                         setState(UiState.Ready)
-                        updateStatus(getString(R.string.voice_clarification))
                     }
                     return@launch
                 }
@@ -720,13 +747,20 @@ class MainActivity : AppCompatActivity() {
                 // 2. Ollama chat.
                 runOnUiThread {
                     voiceFlow.on(VoiceEvent.TRANSCRIBED)
+                    if (inChat) showChange(chatLog.voiceTranscribed(message, transcript.text))
                     setState(UiState.Thinking)
                 }
                 val answer = sendToOllama(transcript.text)
                 runOnUiThread {
                     voiceFlow.on(VoiceEvent.ANSWERED)
-                    binding.tvAiResponse.text = answer
-                    updateStatus(getString(R.string.voice_answer_received))
+                    if (inChat) {
+                        val (id, change) = chatLog.voiceAnswered(message, answer)  // "Preparando la voz…"
+                        voiceAnswer = id
+                        showChange(change)
+                    } else {
+                        binding.tvAiResponse.text = answer
+                        updateStatus(getString(R.string.voice_answer_received))
+                    }
                 }
 
                 // 3. Piper synthesis.
@@ -738,14 +772,12 @@ class MainActivity : AppCompatActivity() {
                 playAudio(audioBytes)
 
             } catch (e: Exception) {
-                if (pairing.configured) {
+                if (inChat) {
                     val outcome = callErrors.describe(e)  // A CancellationException is rethrown: nothing is shown.
                     runOnUiThread {
                         voiceFlow.on(VoiceEvent.FAILED)
-                        val text = callFailureText(outcome)
-                        binding.tvAiResponse.text = text
+                        showVoiceFailure(message, voiceFlow.failedStep ?: VoiceStep.TRANSCRIBE, outcome)
                         setState(UiState.Error)
-                        showNotice(text)
                     }
                 } else runOnUiThread {
                     binding.tvAiResponse.text = getString(R.string.transcription_error)
@@ -755,7 +787,7 @@ class MainActivity : AppCompatActivity() {
             } finally {
                 runOnUiThread {
                     isProcessing = false
-                    binding.btnVoice.isEnabled = voiceAllowed()
+                    updateInputs()
                 }
             }
         }
@@ -847,8 +879,9 @@ class MainActivity : AppCompatActivity() {
         if (wav.isEmpty()) {
             runOnUiThread {
                 voiceFlow.on(VoiceEvent.NO_AUDIO)
+                if (pairing.configured) voiceAnswer?.let { showChange(chatLog.speech(it, null)) }
+                voiceNotice(getString(R.string.voice_no_audio))
                 setState(UiState.Ready)
-                updateStatus(getString(R.string.voice_no_audio))
             }
             return
         }
@@ -868,19 +901,24 @@ class MainActivity : AppCompatActivity() {
                     voiceFlow.on(VoiceEvent.AUDIO_READY)
                     mp.start()
                     setState(UiState.Speaking)
-                    updateStatus(getString(R.string.voice_playing))
+                    if (pairing.configured) voiceAnswer?.let { showChange(chatLog.speech(it, ChatEntry.Speech.SPEAKING)) }
+                    else updateStatus(getString(R.string.voice_playing))
                 }
                 setOnCompletionListener {
                     voiceFlow.on(VoiceEvent.PLAYBACK_DONE)
                     releaseMediaPlayer()
                     setState(UiState.Ready)
-                    updateStatus(getString(R.string.voice_playback_done))
+                    if (pairing.configured) voiceAnswer?.let { showChange(chatLog.speech(it, null)) }
+                    else updateStatus(getString(R.string.voice_playback_done))
                 }
                 setOnErrorListener { _, _, _ ->
                     voiceFlow.on(VoiceEvent.FAILED)
                     releaseMediaPlayer()
                     setState(UiState.Error)
-                    updateStatus(getString(R.string.voice_playback_failed))
+                    if (pairing.configured) {
+                        showChange(chatLog.voiceFailed(voiceMessage, voiceAnswer, VoiceStep.PLAYBACK,
+                            getString(R.string.voice_playback_failed)))
+                    } else updateStatus(getString(R.string.voice_playback_failed))
                     false
                 }
                 prepareAsync()
