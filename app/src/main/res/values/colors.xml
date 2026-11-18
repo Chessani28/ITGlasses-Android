@@ -11,4 +11,5 @@
     <color name="itg_on_accent">#0E1116</color>
     <color name="itg_warning">#F2B84B</color>
     <color name="itg_danger">#FF8A8F</color>
+    <color name="itg_bubble_user">#173A2C</color>
 </resources>

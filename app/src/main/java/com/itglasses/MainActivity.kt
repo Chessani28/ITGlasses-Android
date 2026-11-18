@@ -56,6 +56,9 @@ class MainActivity : AppCompatActivity() {
         ColorTransition(this) { binding.statusDot.backgroundTintList = android.content.res.ColorStateList.valueOf(it) }
     }
     private val strokeColor by lazy { ColorTransition(this) { binding.cardPairing.strokeColor = it } }
+    // Stage C: pairing-mode conversation in bubbles (shared-token mode keeps tv_chat_output).
+    private val chatLog = ChatLog()
+    private val chatBubbles by lazy { ChatBubbles(binding.chatMessages, binding.mainScroll) }
     // Shared-token mode only for an APK without pairing origin; with one, the stored token is kept but never sent.
     private val legacyAuth = AuthInterceptor { activeToken }
     private val backendUrl: String?
@@ -135,6 +138,9 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        // The message bar is fixed at the bottom: resize the content so the keyboard never covers it.
+        @Suppress("DEPRECATION")
+        window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
 
         permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) {
@@ -185,6 +191,8 @@ class MainActivity : AppCompatActivity() {
         renderPairing(if (pairing.configured) pairingController.state.value else PairingState.Unconfigured)
         if (pairing.configured) {
             binding.tvStatus.text = null  // No "Loading..." in pairing mode: the card says how things stand.
+            binding.chatMessages.visibility = android.view.View.VISIBLE
+            binding.tvChatOutput.visibility = android.view.View.GONE
             binding.btnPair.setOnClickListener { pairingController.onEvent(PairingEvent.UserRetry) }
             // Pairing runs only while the app is visible: repeatOnLifecycle cancels it on onStop.
             lifecycleScope.launch {
@@ -193,12 +201,25 @@ class MainActivity : AppCompatActivity() {
                     launch { pairingController.state.collect { renderPairing(it) } }
                     launch {
                         // No looping animation outside the foreground; the next render restarts it.
-                        try { awaitCancellation() } finally { pulse.stop() }
+                        try {
+                            chatBubbles.resumeAnimations()
+                            awaitCancellation()
+                        } finally {
+                            pulse.stop()
+                            chatBubbles.pauseAnimations()
+                        }
                     }
                     launch {
                         // Result of the status check after a 403 (drop: do not repeat an old one on resume).
                         pairingController.callCheck.drop(1).collect { check ->
-                            if (check == CallCheck.UNAVAILABLE || check == CallCheck.RESOLVED) updateStatus(callCheckMessage(check))
+                            ChatFailures.resolution(check)?.let { resolution ->
+                                resolveChatCheck(resolution)
+                                // Voice shows "Comprobando…" in the status line: replace it without repeating the card.
+                                if (binding.tvStatus.text.toString() == pairingText(PairingText.CALL_CHECKING)) {
+                                    if (resolution == ChatCheckResolution.UNAVAILABLE) showNotice(pairingText(PairingText.FORBIDDEN_CALL))
+                                    else binding.tvStatus.text = null
+                                }
+                            }
                         }
                     }
                     launch {
@@ -245,18 +266,35 @@ class MainActivity : AppCompatActivity() {
         CallCheck.IDLE, CallCheck.CHECKING -> pairingText(PairingText.CALL_CHECKING)
     }
 
-    /** Text for a failed call in pairing mode; 403 waits for the controller's status check. */
+    /** Text for a failed voice call in pairing mode; 403 waits for the controller's status check. */
     private fun callFailureText(outcome: CallOutcome): String = when (outcome) {
         CallOutcome.DeviceCheck -> callCheckMessage(pairingController.callCheck.value)
-        is CallOutcome.Notice ->
-            if (outcome.arg == null) getString(CallTexts.of(outcome.text)) else getString(CallTexts.of(outcome.text), outcome.arg)
+        is CallOutcome.Notice -> callText(outcome.text, outcome.arg)
     }
 
-    /** UI thread. The failed message stays in the conversation with the notice instead of an answer. */
-    private fun showChatFailure(message: String, outcome: CallOutcome) {
-        val text = callFailureText(outcome)
-        binding.tvChatOutput.append("\n$message -> \u26A0 $text")
-        showNotice(text)
+    private fun callText(text: CallText, arg: String?): String =
+        if (arg == null) getString(CallTexts.of(text)) else getString(CallTexts.of(text), arg)
+
+    /**
+     * UI thread. A failed chat message stays as "No enviado" in the conversation; the status line is not used,
+     * and nothing is added when the pairing card already explains (deleted, blocked).
+     */
+    private fun showChatFailure(chatId: Long, outcome: CallOutcome) {
+        when (val failure = ChatFailures.present(outcome)) {
+            ChatFailure.Check -> {
+                chatBubbles.apply(chatLog.checking(chatId))
+                // The check may already have ended (the collector only sees later changes).
+                ChatFailures.resolution(pairingController.callCheck.value)?.let { resolveChatCheck(it) }
+            }
+            ChatFailure.NotSentOnly -> chatBubbles.apply(chatLog.failed(chatId, null))
+            is ChatFailure.WithNotice -> chatBubbles.apply(chatLog.failed(chatId, callText(failure.text, failure.arg)))
+        }
+    }
+
+    /** "Comprobando…" becomes "Esta función no está disponible…" or goes away (the card explains). */
+    private fun resolveChatCheck(resolution: ChatCheckResolution) {
+        val notice = if (resolution == ChatCheckResolution.UNAVAILABLE) pairingText(PairingText.FORBIDDEN_CALL) else null
+        chatBubbles.apply(chatLog.resolveCheck(notice))
     }
 
     /**
@@ -358,7 +396,15 @@ class MainActivity : AppCompatActivity() {
         if (message.isEmpty()) return
 
         binding.btnSend.isEnabled = false
-        updateStatus(if (pairing.configured) getString(R.string.call_generating) else "Generating response...")
+        val chatId = if (pairing.configured) {
+            binding.etMessage.text?.clear()  // Empty even if sending fails: the text stays in its bubble.
+            val (id, change) = chatLog.send(message)
+            chatBubbles.apply(change)
+            id
+        } else {
+            updateStatus("Generating response...")
+            0L
+        }
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val json = org.json.JSONObject().put("message", message).toString()
@@ -374,14 +420,16 @@ class MainActivity : AppCompatActivity() {
                             val answer = try {
                                 org.json.JSONObject(responseBody).optString("answer", responseBody)
                             } catch (e: Exception) { responseBody }
-                            binding.tvChatOutput.text = "${binding.tvChatOutput.text}\n$message -> $answer"
-                            binding.etMessage.text?.clear()
                             if (pairing.configured) {
                                 callErrors.onSuccess()
-                                updateStatus("")
-                            } else updateStatus("Connected")
+                                chatBubbles.apply(chatLog.answered(chatId, answer))
+                            } else {
+                                binding.tvChatOutput.text = "${binding.tvChatOutput.text}\n$message -> $answer"
+                                binding.etMessage.text?.clear()
+                                updateStatus("Connected")
+                            }
                         } else if (pairing.configured) {
-                            showChatFailure(message, callErrors.describe(response.code))
+                            showChatFailure(chatId, callErrors.describe(response.code))
                         } else if (response.code == 401) {
                             binding.tvChatOutput.text = "${binding.tvChatOutput.text}\nError: ${authenticationMessage()}"
                             updateStatus("Authentication failed (HTTP 401)")
@@ -396,7 +444,7 @@ class MainActivity : AppCompatActivity() {
                 if (pairing.configured) {
                     val outcome = callErrors.describe(e)  // A CancellationException is rethrown: nothing is shown.
                     runOnUiThread {
-                        showChatFailure(message, outcome)
+                        showChatFailure(chatId, outcome)
                         binding.btnSend.isEnabled = voiceAllowed()
                     }
                     return@launch

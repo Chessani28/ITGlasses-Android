@@ -100,4 +100,7 @@
     <string name="voice_playing">Reproduciendo la respuesta…</string>
     <string name="voice_playback_done">Reproducción terminada</string>
     <string name="voice_playback_failed">No se pudo reproducir la respuesta.</string>
+    <!-- Conversación en burbujas (etapa C). -->
+    <string name="chat_generating_label">Generando respuesta</string>
+    <string name="chat_not_sent">No enviado</string>
 </resources>

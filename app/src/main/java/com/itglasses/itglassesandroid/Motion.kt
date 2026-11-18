@@ -93,3 +93,36 @@ internal class ColorTransition(private val context: Context, private val apply: 
         }
     }
 }
+
+/** Three dots that blink in sequence (0, 200 and 400 ms, 1.2 s cycles). Callers show a static text instead
+ *  when Motion.enabled() is false; start() is then a no-op. */
+internal class TypingDots(private val dots: List<View>) {
+    private val animators = mutableListOf<ObjectAnimator>()
+
+    fun start() {
+        if (animators.isNotEmpty() || dots.isEmpty() || !Motion.enabled(dots.first().context)) return
+        dots.forEachIndexed { index, dot ->
+            animators += ObjectAnimator.ofFloat(dot, View.ALPHA, 0.25f, 1f).apply {
+                duration = 600
+                startDelay = index * 200L
+                repeatCount = ValueAnimator.INFINITE
+                repeatMode = ValueAnimator.REVERSE
+                start()
+            }
+        }
+    }
+
+    fun stop() {
+        animators.forEach { it.cancel() }
+        animators.clear()
+        dots.forEach { it.alpha = 1f }
+    }
+}
+
+/** New bubble: 180 ms fade and 8 dp rise; nothing with animations off. */
+internal fun fadeIn(view: View) {
+    if (!Motion.enabled(view.context)) return
+    view.alpha = 0f
+    view.translationY = 8 * view.resources.displayMetrics.density
+    view.animate().alpha(1f).translationY(0f).setDuration(180).start()
+}

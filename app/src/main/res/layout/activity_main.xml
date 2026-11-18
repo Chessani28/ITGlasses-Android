@@ -1,8 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Stage C: scrolling content on top, message bar fixed at the bottom (window uses adjustResize). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:orientation="vertical">
+
+<ScrollView
+    android:id="@+id/main_scroll"
+    android:layout_width="match_parent"
+    android:layout_height="0dp"
+    android:layout_weight="1"
     android:fillViewport="true">
 
     <LinearLayout
@@ -192,19 +200,14 @@
             android:textSize="14sp"
             android:layout_marginTop="8dp"/>
 
-        <androidx.appcompat.widget.AppCompatEditText
-            android:id="@+id/et_message"
+        <!-- Pairing mode: bubbles (ChatBubbles). Shared-token mode keeps tv_chat_output below, as before. -->
+        <LinearLayout
+            android:id="@+id/chat_messages"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="@string/chat_placeholder"
-            android:layout_marginTop="8dp"/>
-
-        <Button
-            android:id="@+id/btn_send"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/send"
-            android:layout_marginTop="8dp"/>
+            android:layout_marginTop="8dp"
+            android:orientation="vertical"
+            android:visibility="gone"/>
 
         <TextView
             android:id="@+id/tv_chat_output"
@@ -216,3 +219,40 @@
 
     </LinearLayout>
 </ScrollView>
+
+    <LinearLayout
+        android:id="@+id/message_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/itg_surface"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="8dp">
+
+        <androidx.appcompat.widget.AppCompatEditText
+            android:id="@+id/et_message"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/bg_input"
+            android:hint="@string/chat_placeholder"
+            android:inputType="textMultiLine|textCapSentences"
+            android:maxLines="5"
+            android:minHeight="44dp"
+            android:paddingStart="16dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="10dp"
+            android:textColor="@color/itg_text_primary"/>
+
+        <Button
+            android:id="@+id/btn_send"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="@string/send"/>
+    </LinearLayout>
+</LinearLayout>

@@ -17,6 +17,7 @@ class ThemeColorsTest {
         "itg_background" to "#0E1116", "itg_surface" to "#161B22", "itg_surface_raised" to "#1C232C",
         "itg_outline" to "#30363D", "itg_text_primary" to "#E6EDF3", "itg_text_secondary" to "#8B949E",
         "itg_accent" to "#3DDC97", "itg_on_accent" to "#0E1116", "itg_warning" to "#F2B84B", "itg_danger" to "#FF8A8F",
+        "itg_bubble_user" to "#173A2C",
     )
 
     private fun luminance(hex: String): Double {
@@ -42,6 +43,9 @@ class ThemeColorsTest {
         }
         assertTrue(contrast("itg_on_accent", "itg_accent") >= 4.5)
         assertTrue(contrast("itg_text_secondary", "itg_surface_raised") >= 4.5)
+        // Stage C bubbles: user text on #173A2C, notice text (amber) on surface_raised.
+        assertTrue(contrast("itg_text_primary", "itg_bubble_user") >= 4.5)
+        assertTrue(contrast("itg_warning", "itg_surface_raised") >= 4.5)
     }
 
     @Test fun themeUsesThePalette() {
