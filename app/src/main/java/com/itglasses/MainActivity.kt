@@ -254,7 +254,12 @@ class MainActivity : AppCompatActivity() {
         dotColor.to(ContextCompat.getColor(this, PairingTones.dot(view.tone)))
         strokeColor.to(ContextCompat.getColor(this, PairingTones.stroke(view.tone)))
         if (view.pulse && dotShown) pulse.start() else pulse.stop()
+        renderChatEmpty(state == PairingState.Connected)
     }
+
+    /** Welcome only in pairing mode, while Connected and before the first message; voice does not hide it. */
+    private fun renderChatEmpty(connected: Boolean) =
+        fadeVisibility(binding.chatEmpty, ChatEmpty.visible(pairing.configured, connected, chatLog.isEmpty))
 
     /** Voice and Send only while Connected; always in shared-token mode (controller never created there). */
     private fun voiceAllowed(): Boolean = !pairing.configured || pairingController.state.value == PairingState.Connected
@@ -399,6 +404,7 @@ class MainActivity : AppCompatActivity() {
         val chatId = if (pairing.configured) {
             binding.etMessage.text?.clear()  // Empty even if sending fails: the text stays in its bubble.
             val (id, change) = chatLog.send(message)
+            renderChatEmpty(pairingController.state.value == PairingState.Connected)
             chatBubbles.apply(change)
             id
         } else {

@@ -46,6 +46,8 @@ class ThemeColorsTest {
         // Stage C bubbles: user text on #173A2C, notice text (amber) on surface_raised.
         assertTrue(contrast("itg_text_primary", "itg_bubble_user") >= 4.5)
         assertTrue(contrast("itg_warning", "itg_surface_raised") >= 4.5)
+        assertTrue(contrast("itg_accent", "itg_surface_raised") >= 3.0)  // avatar glyph (graphic: 3:1)
+        assertTrue(contrast("itg_text_secondary", "itg_background") >= 4.5)  // welcome subtitle
     }
 
     @Test fun themeUsesThePalette() {

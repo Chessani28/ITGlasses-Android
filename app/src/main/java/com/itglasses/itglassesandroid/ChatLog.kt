@@ -29,6 +29,9 @@ internal class ChatLog(private val limit: Int = 100) {
 
     val entries: List<ChatEntry> get() = list.toList()
 
+    /** Nothing sent yet: the welcome (chat_empty) may show. Never true again after the first message. */
+    val isEmpty: Boolean get() = list.isEmpty()
+
     /** New message: its bubble (sending) and "Generando respuesta". Drops any pending "Comprobando". */
     fun send(text: String): Pair<Long, ChatChange> {
         val removed = removeAll { it is ChatEntry.Checking || it is ChatEntry.Typing }
@@ -125,9 +128,17 @@ internal object ChatFailures {
 internal object BubbleWidth {
     const val FRACTION = 0.8f
 
-    /** [available] is the container's inner width (0 before the first layout, then [fallback] is used). */
-    fun max(available: Int, fallback: Int): Int {
+    /**
+     * [available] is the container's inner width (0 before the first layout, then [fallback] is used).
+     * [reserved] is taken from the limit, so a row with the assistant avatar also stays within 80 %.
+     */
+    fun max(available: Int, fallback: Int, reserved: Int = 0): Int {
         val base = if (available > 0) available else fallback
-        return (base.coerceAtLeast(0) * FRACTION).toInt()
+        return ((base.coerceAtLeast(0) * FRACTION).toInt() - reserved.coerceAtLeast(0)).coerceAtLeast(0)
     }
+}
+
+/** Welcome in the conversation area: pairing mode only, phone Connected, nothing sent yet. Voice does not hide it. */
+internal object ChatEmpty {
+    fun visible(pairingMode: Boolean, connected: Boolean, logEmpty: Boolean): Boolean = pairingMode && connected && logEmpty
 }

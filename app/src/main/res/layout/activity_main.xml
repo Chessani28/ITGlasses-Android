@@ -200,6 +200,48 @@
             android:textSize="14sp"
             android:layout_marginTop="8dp"/>
 
+        <!-- Pairing mode: welcome while Connected and nothing sent yet (ChatEmpty). Voice does not hide it. -->
+        <LinearLayout
+            android:id="@+id/chat_empty"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <ImageView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:padding="10dp"
+                android:background="@drawable/avatar_assistant"
+                android:src="@drawable/ic_assistant"
+                android:importantForAccessibility="no"/>
+
+            <TextView
+                android:id="@+id/tv_chat_empty_title"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:gravity="center"
+                android:text="@string/chat_empty_title"
+                android:textColor="@color/itg_text_primary"
+                android:textSize="16sp"
+                android:textStyle="bold"/>
+
+            <TextView
+                android:id="@+id/tv_chat_empty_subtitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:gravity="center"
+                android:text="@string/chat_empty_subtitle"
+                android:textColor="@color/itg_text_secondary"
+                android:textSize="14sp"/>
+        </LinearLayout>
+
         <!-- Pairing mode: bubbles (ChatBubbles). Shared-token mode keeps tv_chat_output below, as before. -->
         <LinearLayout
             android:id="@+id/chat_messages"

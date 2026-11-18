@@ -120,6 +120,25 @@ internal class TypingDots(private val dots: List<View>) {
 }
 
 /** New bubble: 180 ms fade and 8 dp rise; nothing with animations off. */
+/** Shows at once; hides with a 150 ms fade (at once with animations off). Safe to call repeatedly. */
+internal fun fadeVisibility(view: View, shown: Boolean) {
+    if (shown) {
+        view.animate().cancel()
+        view.alpha = 1f
+        view.visibility = View.VISIBLE
+        return
+    }
+    if (view.visibility != View.VISIBLE) return
+    if (!Motion.enabled(view.context)) {
+        view.visibility = View.GONE
+        return
+    }
+    view.animate().alpha(0f).setDuration(150).withEndAction {
+        view.visibility = View.GONE
+        view.alpha = 1f
+    }.start()
+}
+
 internal fun fadeIn(view: View) {
     if (!Motion.enabled(view.context)) return
     view.alpha = 0f

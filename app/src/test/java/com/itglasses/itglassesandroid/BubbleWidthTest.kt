@@ -18,6 +18,13 @@ class BubbleWidthTest {
     }
 
     @Test
+    fun `the avatar space is taken from the limit and never goes below zero`() {
+        assertEquals(764, BubbleWidth.max(available = 1000, fallback = 0, reserved = 36))
+        assertEquals(0, BubbleWidth.max(available = 40, fallback = 0, reserved = 36))
+        assertEquals(800, BubbleWidth.max(available = 1000, fallback = 0, reserved = -10))
+    }
+
+    @Test
     fun `bubbles wrap their content and follow the container width`() {
         val source = ModuleFiles.file("src/main/java/com/itglasses/itglassesandroid/ChatBubbles.kt").readText()
         assertTrue(source.contains("BubbleWidth.max("))

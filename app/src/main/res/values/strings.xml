@@ -103,4 +103,7 @@
     <!-- Conversación en burbujas (etapa C). -->
     <string name="chat_generating_label">Generando respuesta</string>
     <string name="chat_not_sent">No enviado</string>
+    <!-- Bienvenida en la zona del chat: solo Conectado y antes del primer mensaje. -->
+    <string name="chat_empty_title">Hola, soy tu asistente de ITGlasses</string>
+    <string name="chat_empty_subtitle">Escribe una pregunta sobre tus equipos o usa la voz.</string>
 </resources>
