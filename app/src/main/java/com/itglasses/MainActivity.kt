@@ -106,13 +106,13 @@ class MainActivity : AppCompatActivity() {
             val busy = state != UiState.Idle && state != UiState.Ready && state != UiState.Error
             binding.btnVoice.isEnabled = !busy && voiceAllowed()
             binding.tvStatus.text = when (state) {
-                UiState.Recording -> "Recording..."
-                UiState.Transcribing -> "Transcribing..."
-                UiState.Thinking -> "Thinking..."
-                UiState.Synthesizing -> "Synthesizing..."
-                UiState.Speaking -> "Speaking..."
-                UiState.Ready -> "Ready"
-                UiState.Error -> "Error"
+                UiState.Recording -> getString(R.string.voice_state_recording, 0)
+                UiState.Transcribing -> getString(R.string.voice_state_transcribing)
+                UiState.Thinking -> getString(R.string.voice_state_thinking)
+                UiState.Synthesizing -> getString(R.string.voice_state_synthesizing)
+                UiState.Speaking -> getString(R.string.voice_state_speaking)
+                UiState.Ready -> getString(R.string.voice_state_ready)
+                UiState.Error -> getString(R.string.voice_state_error)
                 UiState.Idle -> binding.tvStatus.text.toString()
             }
         }
@@ -133,7 +133,7 @@ class MainActivity : AppCompatActivity() {
             if (granted) {
                 startRecording()
             } else {
-                updateStatus("Microphone permission denied")
+                updateStatus(getString(R.string.voice_mic_denied))
             }
         }
         activeToken = BackendConfiguration.getStoredToken(this)
@@ -414,7 +414,7 @@ class MainActivity : AppCompatActivity() {
             this,
             Manifest.permission.RECORD_AUDIO
         ) != PackageManager.PERMISSION_GRANTED) {
-            updateStatus("Microphone permission denied")
+            updateStatus(getString(R.string.voice_mic_denied))
             return
         }
 
@@ -423,7 +423,7 @@ class MainActivity : AppCompatActivity() {
         val audioFormat = AudioFormat.ENCODING_PCM_16BIT
         val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
         if (bufferSize <= 0) {
-            updateStatus("AudioRecord unsupported")
+            updateStatus(getString(R.string.voice_mic_unsupported))
             return
         }
 
@@ -435,7 +435,7 @@ class MainActivity : AppCompatActivity() {
             bufferSize
         )
         if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
-            updateStatus("AudioRecord init failed")
+            updateStatus(getString(R.string.voice_mic_unavailable))
             audioRecord?.release()
             audioRecord = null
             return
@@ -444,8 +444,8 @@ class MainActivity : AppCompatActivity() {
         recordedPcm.reset()
         isRecording = true
         recordingStartMs = System.currentTimeMillis()
-        binding.btnVoice.text = "Stop"
-        updateStatus("Recording... 0s")
+        binding.btnVoice.text = getString(R.string.voice_button_stop)
+        updateStatus(getString(R.string.voice_state_recording, 0))
         audioRecord?.startRecording()
 
         recordingThread = Thread {
@@ -468,7 +468,7 @@ class MainActivity : AppCompatActivity() {
                 if (elapsed >= MAX_DURATION_MS) {
                     isRecording = false
                     runOnUiThread {
-                        binding.btnVoice.text = "Voice"
+                        binding.btnVoice.text = getString(R.string.voice_button_start)
                         finishRecording()
                     }
                     break
@@ -477,7 +477,7 @@ class MainActivity : AppCompatActivity() {
                 // Recording state and duration display, updated once per second.
                 if (now - lastStatusMs >= 1000) {
                     lastStatusMs = now
-                    runOnUiThread { updateStatus("Recording... ${elapsed / 1000}s") }
+                    runOnUiThread { updateStatus(getString(R.string.voice_state_recording, (elapsed / 1000).toInt())) }
                 }
             }
         }
@@ -499,21 +499,21 @@ class MainActivity : AppCompatActivity() {
         audioRecord?.release()
         audioRecord = null
 
-        binding.btnVoice.text = "Voice"
+        binding.btnVoice.text = getString(R.string.voice_button_start)
         val pcm = synchronized(recordedPcm) { recordedPcm.toByteArray() }
         if (pcm.isEmpty()) {
-            updateStatus("Error: empty recording")
+            updateStatus(getString(R.string.voice_recording_empty))
             return
         }
 
-        updateStatus("Saving...")
+        updateStatus(getString(R.string.voice_saving))
         val wav = pcmToWav(pcm, 16000, 1, 16)
         try {
             // Temporary private app storage (cache dir).
             val file = File(cacheDir, "recording.wav")
             FileOutputStream(file).use { it.write(wav) }
             val duration = pcm.size / (16000 * 2)
-            updateStatus("Saved: ${file.name} ${file.length()} bytes, ~${duration}s")
+            updateStatus(getString(R.string.voice_saved, duration))
             // Run the full voice pipeline off the UI thread:
             // transcribe (Vosk) → Ollama chat → Piper synthesis → MediaPlayer playback.
             isProcessing = true
@@ -521,7 +521,7 @@ class MainActivity : AppCompatActivity() {
             setState(UiState.Transcribing)
             runVoicePipeline(wav)
         } catch (e: Exception) {
-            updateStatus("Error: ${e.message}")
+            updateStatus(getString(R.string.voice_save_failed))
             isProcessing = false
             binding.btnVoice.isEnabled = voiceAllowed()
         }
@@ -544,7 +544,7 @@ class MainActivity : AppCompatActivity() {
                     runOnUiThread {
                         binding.tvTranscription.text = getString(R.string.transcription_empty)
                         setState(UiState.Ready)
-                        updateStatus("Completed: no speech recognized")
+                        updateStatus(getString(R.string.transcription_empty))
                     }
                     return@launch
                 }
@@ -555,7 +555,7 @@ class MainActivity : AppCompatActivity() {
                     runOnUiThread {
                         binding.tvTranscription.text = transcript.clarification
                         setState(UiState.Ready)
-                        updateStatus("Clarification required")
+                        updateStatus(getString(R.string.voice_clarification))
                     }
                     return@launch
                 }
@@ -565,7 +565,7 @@ class MainActivity : AppCompatActivity() {
                 val answer = sendToOllama(transcript.text)
                 runOnUiThread {
                     binding.tvAiResponse.text = answer
-                    updateStatus("AI response received")
+                    updateStatus(getString(R.string.voice_answer_received))
                 }
 
                 // 3. Piper synthesis.
@@ -685,7 +685,7 @@ class MainActivity : AppCompatActivity() {
         if (wav.isEmpty()) {
             runOnUiThread {
                 setState(UiState.Ready)
-                updateStatus("No audio to play")
+                updateStatus(getString(R.string.voice_no_audio))
             }
             return
         }
@@ -704,17 +704,17 @@ class MainActivity : AppCompatActivity() {
                 setOnPreparedListener { mp ->
                     mp.start()
                     setState(UiState.Speaking)
-                    updateStatus("Playing response")
+                    updateStatus(getString(R.string.voice_playing))
                 }
                 setOnCompletionListener {
                     releaseMediaPlayer()
                     setState(UiState.Ready)
-                    updateStatus("Playback complete")
+                    updateStatus(getString(R.string.voice_playback_done))
                 }
                 setOnErrorListener { _, _, _ ->
                     releaseMediaPlayer()
                     setState(UiState.Error)
-                    updateStatus("Playback error")
+                    updateStatus(getString(R.string.voice_playback_failed))
                     false
                 }
                 prepareAsync()

@@ -73,7 +73,7 @@
             android:id="@+id/btn_voice"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Voice"
+            android:text="@string/voice_button_start"
             android:layout_marginTop="8dp"/>
 
         <Button
@@ -90,40 +90,48 @@
             android:layout_marginTop="8dp"
             android:enabled="false"/>
 
-        <TextView
+        <!-- Meta Wearables. Hidden in the phone variant (PhoneWearablesIntegration). -->
+        <LinearLayout
+            android:id="@+id/meta_section"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/meta_mode_title"
-            android:textStyle="bold"
-            android:layout_marginTop="20dp"/>
+            android:orientation="vertical">
 
-        <TextView
-            android:id="@+id/tv_meta_status"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/meta_initializing"
-            android:layout_marginTop="6dp"/>
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/meta_mode_title"
+                android:textStyle="bold"
+                android:layout_marginTop="20dp"/>
 
-        <Button
-            android:id="@+id/btn_meta_register"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/meta_register"
-            android:enabled="false"/>
+            <TextView
+                android:id="@+id/tv_meta_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/meta_initializing"
+                android:layout_marginTop="6dp"/>
 
-        <Button
-            android:id="@+id/btn_meta_session"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/meta_start_session"
-            android:enabled="false"/>
+            <Button
+                android:id="@+id/btn_meta_register"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/meta_register"
+                android:enabled="false"/>
 
-        <Button
-            android:id="@+id/btn_meta_stop"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/meta_stop_session"
-            android:enabled="false"/>
+            <Button
+                android:id="@+id/btn_meta_session"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/meta_start_session"
+                android:enabled="false"/>
+
+            <Button
+                android:id="@+id/btn_meta_stop"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/meta_stop_session"
+                android:enabled="false"/>
+        </LinearLayout>
 
         <TextView
             android:id="@+id/tv_status"
