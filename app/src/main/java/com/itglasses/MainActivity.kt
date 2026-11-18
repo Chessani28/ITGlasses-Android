@@ -64,10 +64,14 @@ class MainActivity : AppCompatActivity() {
         get() = if (pairing.configured) pairing.origin else BackendConfiguration.getBaseUrl(this)
     private val STATUS_ENDPOINT = "/api/v1/status"
     private val CHAT_ENDPOINT = "/api/v1/chat"
+    /** Pairing mode: the same assistant as the web panel (documents, authorization, per-device sessions). */
+    private val ASSISTANT_ENDPOINT = "/api/v1/assistant/chat"
     private val TRANSCRIBE_ENDPOINT = "/api/v1/voice/transcribe"
     private val SYNTHESIZE_ENDPOINT = "/api/v1/voice/synthesize"
 
     @Volatile private var activeToken: String? = null
+    /** One assistant session in memory, shared by typed chat and voice (written on the UI or the voice IO thread). */
+    @Volatile private var assistantSession: String? = null
 
     private val okHttpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -434,18 +438,12 @@ class MainActivity : AppCompatActivity() {
         }
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val json = org.json.JSONObject().put("message", message).toString()
-                val body = json.toRequestBody("application/json".toMediaType())
-                val request = Request.Builder()
-                    .url("$baseUrl$CHAT_ENDPOINT")
-                    .post(body)
-                    .build()
-                okHttpClient.newCall(request).execute().use { response ->
+                okHttpClient.newCall(chatRequest(baseUrl, message)).execute().use { response ->
                     val responseBody = response.body?.string()
                     runOnUiThread {
                         if (response.isSuccessful && responseBody != null) {
                             val answer = try {
-                                org.json.JSONObject(responseBody).optString("answer", responseBody)
+                                answerOf(org.json.JSONObject(responseBody), responseBody)
                             } catch (e: Exception) { responseBody }
                             if (pairing.configured) {
                                 callErrors.onSuccess()
@@ -765,7 +763,8 @@ class MainActivity : AppCompatActivity() {
 
                 // 3. Piper synthesis.
                 runOnUiThread { setState(UiState.Synthesizing) }
-                val audioBytes = synthesizeSpeech(answer)
+                // Pairing mode: the bubble keeps the sources, the voice does not read them (SpokenText).
+                val audioBytes = synthesizeSpeech(if (inChat) SpokenText.of(answer) else answer)
                 callErrors.onSuccess()
 
                 // 4. MediaPlayer playback.
@@ -826,16 +825,32 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** POST recognized text to the existing Ollama chat endpoint /api/v1/chat. */
+    /**
+     * Chat request. Pairing mode: /api/v1/assistant/chat with the shared session (none on the first question: the
+     * backend creates it). Shared-token mode: /api/v1/chat, as before.
+     */
+    private fun chatRequest(baseUrl: String, message: String): Request {
+        val json = org.json.JSONObject().put("message", message)
+        if (pairing.configured) assistantSession?.let { json.put("session_id", it) }
+        return Request.Builder()
+            .url(baseUrl + if (pairing.configured) ASSISTANT_ENDPOINT else CHAT_ENDPOINT)
+            .post(json.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+    }
+
+    /** The answer text; in pairing mode the returned session is kept (AssistantSession validates it). */
+    private fun answerOf(obj: org.json.JSONObject, body: String): String {
+        if (pairing.configured) {
+            val returned = if (obj.isNull("session_id")) null else obj.optString("session_id")
+            assistantSession = AssistantSession.next(assistantSession, returned)
+        }
+        return obj.optString("answer", body)
+    }
+
+    /** POST recognized text to the chat: the assistant in pairing mode, /api/v1/chat in shared-token mode. */
     private fun sendToOllama(message: String): String {
         val baseUrl = backendUrl ?: throw IllegalStateException("Backend URL is not configured.")
-        val json = org.json.JSONObject().put("message", message).toString()
-        val body = json.toRequestBody("application/json".toMediaType())
-        val request = Request.Builder()
-            .url("$baseUrl$CHAT_ENDPOINT")
-            .post(body)
-            .build()
-        return okHttpClient.newCall(request).execute().use { response ->
+        return okHttpClient.newCall(chatRequest(baseUrl, message)).execute().use { response ->
             val responseBody = response.body?.string() ?: ""
             if (!response.isSuccessful) {
                 if (pairing.configured) throw CallHttpException(response.code)  // Only the status, never the body.
@@ -844,7 +859,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 throw RuntimeException("Chat HTTP ${response.code} ${response.message ?: ""}")
             }
-            org.json.JSONObject(responseBody).optString("answer", responseBody)
+            answerOf(org.json.JSONObject(responseBody), responseBody)
         }
     }
 
