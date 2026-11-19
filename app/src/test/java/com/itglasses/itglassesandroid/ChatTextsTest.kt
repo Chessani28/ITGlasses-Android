@@ -13,7 +13,8 @@ class ChatTextsTest {
 
     @Test fun chatTextsAreTheApprovedOnesAndUsed() {
         val approved = mapOf("chat_generating_label" to "Generando respuesta", "chat_not_sent" to "No enviado",
-            "chat_transcribing_label" to "Transcribiendo", "chat_thinking_label" to "Pensando")
+            "chat_transcribing_label" to "Transcribiendo", "chat_thinking_label" to "Pensando",
+            "chat_basic_engine" to "Motor de voz básico")
         val code = ModuleFiles.file("src/main/java/com/itglasses/itglassesandroid/ChatBubbles.kt").readText()
         for ((name, text) in approved) {
             assertEquals(name, text, strings[name])

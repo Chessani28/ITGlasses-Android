@@ -134,4 +134,20 @@ class ChatLogVoiceTest {
         assertTrue(small.voiceFailed(id, 999, VoiceStep.SYNTHESIS, null).updated.isEmpty())
         assertTrue(small.entries.size <= 2)
     }
+
+    @Test fun basicEngineLabelOnlyForTheVoskFallbackNeverForWhisper() {
+        val (whisper, _) = log.voiceStarted()
+        val fromWhisper = log.voiceTranscribed(whisper, "hola").updated.single() as ChatEntry.User
+        assertFalse("con Whisper no se muestra la etiqueta", fromWhisper.basicEngine || fromWhisper.showsBasicEngine)
+
+        val (vosk, _) = log.voiceStarted()
+        val fromVosk = log.voiceTranscribed(vosk, "hola", basicEngine = true).updated.single() as ChatEntry.User
+        assertTrue(fromVosk.showsBasicEngine)
+        // The label stays when the answer arrives or the question fails.
+        log.voiceAnswered(vosk, "respuesta")
+        assertTrue(users().single { it.id == vosk }.showsBasicEngine)
+        assertFalse(users().single { it.id == whisper }.showsBasicEngine)
+        assertFalse("la burbuja provisional nunca la muestra",
+            ChatEntry.User(1, "", Status.TRANSCRIBING, basicEngine = true).showsBasicEngine)
+    }
 }

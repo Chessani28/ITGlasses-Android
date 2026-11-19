@@ -126,7 +126,11 @@ internal class ChatBubbles(private val container: LinearLayout, private val scro
             val notSent = label(context.getString(R.string.chat_not_sent)).apply {
                 visibility = if (entry.status == ChatEntry.Status.FAILED) View.VISIBLE else View.GONE
             }
-            Row(column(Gravity.END, bubble, notSent), bubble = bubble, notSent = notSent)
+            // Grey "Motor de voz básico" only when the Vosk fallback transcribed it (never with Whisper).
+            val basic = label(context.getString(R.string.chat_basic_engine)).apply {
+                visibility = if (entry.showsBasicEngine) View.VISIBLE else View.GONE
+            }
+            Row(column(Gravity.END, bubble, basic, notSent), bubble = bubble, notSent = notSent)
         }
         is ChatEntry.Assistant -> {
             val reserved = dp(ChatAvatar.reservedDp(entry))

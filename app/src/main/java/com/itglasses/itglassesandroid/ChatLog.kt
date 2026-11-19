@@ -16,7 +16,11 @@ internal sealed class ChatEntry {
     /** Voice answer: "Preparando la voz…" or "Hablando…" under the bubble; null when there is no label. */
     enum class Speech { PREPARING, SPEAKING }
 
-    data class User(override val id: Long, val text: String, val status: Status) : ChatEntry()
+    /** [basicEngine]: transcribed by the Vosk fallback, shown as "Motor de voz básico" (never for Whisper). */
+    data class User(override val id: Long, val text: String, val status: Status, val basicEngine: Boolean = false) :
+        ChatEntry() {
+        val showsBasicEngine: Boolean get() = basicEngine && status != Status.TRANSCRIBING
+    }
     data class Assistant(override val id: Long, val text: String, val speech: Speech? = null) : ChatEntry()
     data class Notice(override val id: Long, val text: String) : ChatEntry()
     /** Waiting bubble while the answer to message [forMessage] is pending. */
@@ -85,8 +89,8 @@ internal class ChatLog(private val limit: Int = 100) {
     }
 
     /** The provisional bubble gets the recognised text, and "Pensando" waits for the answer. */
-    fun voiceTranscribed(message: Long, text: String): ChatChange {
-        val updated = replaceUser(message) { it.copy(text = text, status = ChatEntry.Status.SENDING) }
+    fun voiceTranscribed(message: Long, text: String, basicEngine: Boolean = false): ChatChange {
+        val updated = replaceUser(message) { it.copy(text = text, status = ChatEntry.Status.SENDING, basicEngine = basicEngine) }
         if (updated.isEmpty()) return ChatChange()  // Dropped by the limit meanwhile.
         return finish(listOf(ChatEntry.Typing(nextId++, message, ChatEntry.Waiting.THINKING)), emptyList(), updated)
     }

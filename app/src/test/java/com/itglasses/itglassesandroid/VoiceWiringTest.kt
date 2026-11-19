@@ -36,4 +36,18 @@ class VoiceWiringTest {
             assertTrue(call, activity.contains(call))
         }
     }
+
+    @Test fun voz1WhisperWithVoskFallbackAndVoiceRecognitionWithoutEffects() {
+        assertTrue("la cabecera del motor", activity.contains("builder.header(SttEngine.HEADER, it)"))
+        assertTrue("el motor depende del modo", activity.contains("SttEngine.first(pairing.configured)"))
+        assertTrue("un único reintento tras 503", activity.contains("SttEngine.fallbackAfter(used, response.code)"))
+        assertTrue("la etiqueta llega a la burbuja",
+            activity.contains("chatLog.voiceTranscribed(message, transcript.text, transcript.basicEngine)"))
+        assertTrue("los orígenes del micrófono", activity.contains("for (source in MicSources.order)"))
+        assertFalse("ya no se fija MIC", activity.contains("MediaRecorder.AudioSource.MIC"))
+        for (effect in listOf("NoiseSuppressor", "AutomaticGainControl", "AcousticEchoCanceler")) {
+            assertFalse("sin $effect", activity.contains(effect))
+        }
+        assertTrue("registro solo en depuración", activity.contains("if (!BuildConfig.DEBUG) return"))
+    }
 }

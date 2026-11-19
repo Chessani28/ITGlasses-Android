@@ -7,8 +7,9 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaPlayer
-import android.media.MediaRecorder
 import android.os.Bundle
+import android.os.SystemClock
+import android.util.Log
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
@@ -100,6 +101,10 @@ class MainActivity : AppCompatActivity() {
     private var recordingThread: Thread? = null
     private val recordedPcm = ByteArrayOutputStream()
     private var recordingStartMs = 0L
+    /** Voz 1: microphone source in use, and debug-only timing of each voice question (no text, no audio). */
+    private var micSource: Int? = null
+    private var voiceT0 = 0L
+    @Volatile private var voiceEngine: String? = null
     // Stage B2 (pairing mode): full voice screen with the real level; the 30 s limit lives in VoiceTiming.
     private val voiceFlow = VoiceFlow()
     private val voiceMeter = VoiceMeter()
@@ -524,33 +529,37 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        audioRecord = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
-            sampleRate,
-            channelConfig,
-            audioFormat,
-            bufferSize
-        )
-        if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
-            voiceStartFailed(getString(R.string.voice_mic_unavailable))
-            audioRecord?.release()
-            audioRecord = null
-            return
-        }
-
         recordedPcm.reset()
         voiceMeter.reset()
-        // The voice screen opens only once the microphone is really recording.
-        val started = try {
-            audioRecord?.startRecording()
-            audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING
-        } catch (e: IllegalStateException) {
-            false
+        // VOICE_RECOGNITION first, MIC as fallback (MicSources); no audio effects. The voice screen opens only
+        // once the microphone is really recording.
+        micSource = null
+        for (source in MicSources.order) {
+            val record = try {
+                AudioRecord(source, sampleRate, channelConfig, audioFormat, bufferSize)
+            } catch (e: IllegalArgumentException) {
+                null
+            }
+            if (record == null || record.state != AudioRecord.STATE_INITIALIZED) {
+                record?.release()
+                continue
+            }
+            val recording = try {
+                record.startRecording()
+                record.recordingState == AudioRecord.RECORDSTATE_RECORDING
+            } catch (e: IllegalStateException) {
+                false
+            }
+            if (!recording) {
+                record.release()
+                continue
+            }
+            audioRecord = record
+            micSource = source
+            break
         }
-        if (!started) {
+        if (audioRecord == null) {
             voiceStartFailed(getString(R.string.voice_mic_unavailable))
-            audioRecord?.release()
-            audioRecord = null
             return
         }
         isRecording = true
@@ -666,6 +675,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        voiceT0 = SystemClock.elapsedRealtime()
         if (pairing.configured) {
             // Provisional bubble "Transcribiendo"; the first one also hides the welcome.
             val (id, change) = chatLog.voiceStarted()
@@ -711,6 +721,7 @@ class MainActivity : AppCompatActivity() {
                 val transcript = transcribeWavRaw(wav)
                 if (!inChat) runOnUiThread { binding.tvTranscription.text = transcript.text }
 
+                runOnUiThread { voiceTiming("transcribe") }
                 if (transcript.text.isBlank()) {
                     runOnUiThread {
                         voiceFlow.on(VoiceEvent.NO_SPEECH)
@@ -745,11 +756,12 @@ class MainActivity : AppCompatActivity() {
                 // 2. Ollama chat.
                 runOnUiThread {
                     voiceFlow.on(VoiceEvent.TRANSCRIBED)
-                    if (inChat) showChange(chatLog.voiceTranscribed(message, transcript.text))
+                    if (inChat) showChange(chatLog.voiceTranscribed(message, transcript.text, transcript.basicEngine))
                     setState(UiState.Thinking)
                 }
                 val answer = sendToOllama(transcript.text)
                 runOnUiThread {
+                    voiceTiming("answer")
                     voiceFlow.on(VoiceEvent.ANSWERED)
                     if (inChat) {
                         val (id, change) = chatLog.voiceAnswered(message, answer)  // "Preparando la voz…"
@@ -792,37 +804,66 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Recognized-text result from the Vosk endpoint, including clarification policy. */
+    /** Recognized-text result from the transcription endpoint, including clarification policy. */
     private data class TranscriptResult(
         val text: String,
         val needsClarification: Boolean,
-        val clarification: String
+        val clarification: String,
+        /** Transcribed by the Vosk fallback (pairing mode): "Motor de voz básico". */
+        val basicEngine: Boolean = false,
     )
 
-    /** POST raw WAV to /api/v1/voice/transcribe and parse the JSON response. */
+    /** Debug builds only: elapsed time since "Detener y enviar", engine and microphone. Never text or audio. */
+    private fun voiceTiming(step: String) {
+        if (!BuildConfig.DEBUG) return
+        Log.d(VoiceDebugLog.TAG, VoiceDebugLog.line(step, SystemClock.elapsedRealtime() - voiceT0, voiceEngine,
+            MicSources.name(micSource)))
+    }
+
+    /**
+     * POST raw WAV to /api/v1/voice/transcribe and parse the JSON response. Pairing mode asks for Whisper and
+     * retries once with Vosk after a 503 (SttEngine); shared-token mode sends no engine header, as before.
+     */
     private fun transcribeWavRaw(wav: ByteArray): TranscriptResult {
         val baseUrl = backendUrl ?: throw IllegalStateException("Backend URL is not configured.")
         val body = wav.toRequestBody("audio/wav".toMediaType())
-        val request = Request.Builder()
-            .url("$baseUrl$TRANSCRIBE_ENDPOINT")
-            .post(body)
-            .build()
-        return okHttpClient.newCall(request).execute().use { response ->
-            val responseBody = response.body?.string() ?: ""
-            if (!response.isSuccessful) {
-                if (pairing.configured) throw CallHttpException(response.code)  // Only the status, never the body.
-                if (response.code == 401) {
-                    throw RuntimeException(authenticationMessage())
+        var engine = SttEngine.first(pairing.configured)
+        while (true) {
+            val builder = Request.Builder().url("$baseUrl$TRANSCRIBE_ENDPOINT").post(body)
+            engine?.let { builder.header(SttEngine.HEADER, it) }
+            val used = engine
+            val result = okHttpClient.newCall(builder.build()).execute().use { response ->
+                if (!response.isSuccessful) {
+                    val retry = SttEngine.fallbackAfter(used, response.code)
+                    if (retry != null) {
+                        engine = retry
+                        return@use null
+                    }
                 }
-                throw RuntimeException("Transcribe HTTP ${response.code} ${response.message ?: ""}")
+                readTranscript(response, used)
             }
-            val obj = org.json.JSONObject(responseBody)
-            TranscriptResult(
-                text = obj.optString("text", "").trim(),
-                needsClarification = obj.optBoolean("needs_clarification", false),
-                clarification = obj.optString("clarification", "")
-            )
+            if (result != null) return result
         }
+    }
+
+    /** Errors as before (pairing mode: only the status, never the body); success records the engine used. */
+    private fun readTranscript(response: okhttp3.Response, engine: String?): TranscriptResult {
+        val responseBody = response.body?.string() ?: ""
+        if (!response.isSuccessful) {
+            if (pairing.configured) throw CallHttpException(response.code)  // Only the status, never the body.
+            if (response.code == 401) {
+                throw RuntimeException(authenticationMessage())
+            }
+            throw RuntimeException("Transcribe HTTP ${response.code} ${response.message ?: ""}")
+        }
+        val obj = org.json.JSONObject(responseBody)
+        voiceEngine = engine
+        return TranscriptResult(
+            text = obj.optString("text", "").trim(),
+            needsClarification = obj.optBoolean("needs_clarification", false),
+            clarification = obj.optString("clarification", ""),
+            basicEngine = SttEngine.isBasic(engine),
+        )
     }
 
     /**
@@ -914,6 +955,7 @@ class MainActivity : AppCompatActivity() {
                 setDataSource(file.absolutePath)
                 setOnPreparedListener { mp ->
                     voiceFlow.on(VoiceEvent.AUDIO_READY)
+                    voiceTiming("audio_start")
                     mp.start()
                     setState(UiState.Speaking)
                     if (pairing.configured) voiceAnswer?.let { showChange(chatLog.speech(it, ChatEntry.Speech.SPEAKING)) }

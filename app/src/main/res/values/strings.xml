@@ -106,6 +106,8 @@
     <!-- Voz en la conversación (etapa B3): etiquetas con puntos animados; sin animaciones, voice_state_* con "…". -->
     <string name="chat_transcribing_label">Transcribiendo</string>
     <string name="chat_thinking_label">Pensando</string>
+    <!-- Voz 1: la transcripción vino del respaldo Vosk porque Whisper no estaba disponible. -->
+    <string name="chat_basic_engine">Motor de voz básico</string>
     <!-- Bienvenida en la zona del chat: solo Conectado y antes del primer mensaje. -->
     <string name="chat_empty_title">Hola, soy tu asistente de ITGlasses</string>
     <string name="chat_empty_subtitle">Escribe una pregunta sobre tus equipos o usa la voz.</string>
