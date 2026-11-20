@@ -196,8 +196,9 @@ internal class ChatBubbles(private val container: LinearLayout, private val scro
     }
 
     /**
-     * Small speaker + "Preparando la voz…" / "Hablando…" under a voice answer, aligned with the bubble (past the
-     * avatar). A polite live region: TalkBack announces the change without cutting the answer.
+     * Small speaker + "Preparando la voz…" / "Hablando…" / "No se pudo leer en voz alta." under a voice answer,
+     * aligned with the bubble (past the avatar). A polite live region: TalkBack announces the change without
+     * cutting the answer.
      */
     private fun speechLabel(): SpeechLabel {
         val icon = ImageView(context).apply {
@@ -224,6 +225,7 @@ internal class ChatBubbles(private val container: LinearLayout, private val scro
             null -> label.row.visibility = View.GONE
             ChatEntry.Speech.PREPARING -> label.text.text = context.getString(R.string.voice_state_synthesizing)
             ChatEntry.Speech.SPEAKING -> label.text.text = context.getString(R.string.voice_state_speaking)
+            ChatEntry.Speech.FAILED -> label.text.text = context.getString(R.string.voice_unspoken)
         }
         if (speech != null) label.row.visibility = View.VISIBLE
         if (label.speaking) label.pulse.start() else label.pulse.stop()

@@ -21,7 +21,11 @@ class AssistantEndpointTest {
             activity.contains("AssistantSession.next(assistantSession, returned)"))
         assertTrue("solo el modo emparejamiento manda session_id",
             activity.contains("if (pairing.configured) assistantSession?.let { json.put(\"session_id\", it) }"))
-        assertTrue("la voz debe leer SpokenText.of(answer) en el modo emparejamiento",
-            activity.contains("synthesizeSpeech(if (inChat) SpokenText.of(answer) else answer)"))
+        // Speech app stage: the voice reads the backend's `speech` or the answer without sources (SpokenAnswer, which
+        // goes through SpokenText); shared-token mode the whole answer, as before.
+        assertTrue("la voz debe leer SpokenAnswer.of(reply.text, reply.speech) en el modo emparejamiento",
+            activity.contains("synthesizeSpeech(if (inChat) SpokenAnswer.of(reply.text, reply.speech) else answer)"))
+        assertTrue("speech ausente o null no debe romper la lectura",
+            activity.contains("val speech = if (obj.isNull(\"speech\")) null else obj.optString(\"speech\")"))
     }
 }

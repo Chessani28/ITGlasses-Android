@@ -28,4 +28,12 @@ internal object VoiceDebugLog {
         require(safe.matches(step)) { "step must be a short identifier" }
         return "step=$step ms=${millis.coerceAtLeast(0)} engine=${engine ?: "none"} mic=${mic ?: "none"}"
     }
+
+    /** A failed call (debug builds only): the exception type and the HTTP status, never a message, text or audio. */
+    fun failure(step: String, millis: Long, error: Throwable): String {
+        require(safe.matches(step)) { "step must be a short identifier" }
+        val type = error.javaClass.simpleName.filter { it.isLetterOrDigit() || it == '_' }.take(40)
+        val status = (error as? HttpFailure)?.status?.toString() ?: "none"
+        return "step=$step ms=${millis.coerceAtLeast(0)} error=${type.ifEmpty { "Unknown" }} status=$status"
+    }
 }

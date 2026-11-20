@@ -13,8 +13,11 @@ internal sealed class ChatEntry {
     /** Label of the waiting bubble: "Generando respuesta" (typed) or "Pensando" (voice). */
     enum class Waiting { GENERATING, THINKING }
 
-    /** Voice answer: "Preparando la voz…" or "Hablando…" under the bubble; null when there is no label. */
-    enum class Speech { PREPARING, SPEAKING }
+    /**
+     * Voice answer: "Preparando la voz…", "Hablando…" or, when the voice failed after the answer was shown, the
+     * discreet "No se pudo leer en voz alta."; null when there is no label.
+     */
+    enum class Speech { PREPARING, SPEAKING, FAILED }
 
     /** [basicEngine]: transcribed by the Vosk fallback, shown as "Motor de voz básico" (never for Whisper). */
     data class User(override val id: Long, val text: String, val status: Status, val basicEngine: Boolean = false) :
@@ -120,6 +123,9 @@ internal class ChatLog(private val limit: Int = 100) {
         list[index] = updated
         return ChatChange(updated = listOf(updated))
     }
+
+    /** The voice of [answer] failed after the answer was shown: the discreet label instead of a notice. */
+    fun voiceUnspoken(answer: Long?): ChatChange = answer?.let { speech(it, ChatEntry.Speech.FAILED) } ?: ChatChange()
 
     /**
      * A voice step failed; [notice] below (null when the pairing card already explains). "No enviado" only when

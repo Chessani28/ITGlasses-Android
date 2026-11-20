@@ -30,21 +30,24 @@ class VoiceFailuresTest {
     }
 
     @Test fun synthesisFailureKeepsTheAnswerAndNeverSaysNotSent() {
-        for (failure in listOf(network, ChatFailure.NotSentOnly, ChatFailure.Check)) {
+        // Speech app stage: with the answer shown, a network failure of the voice is the discreet label
+        // "No se pudo leer en voz alta." (Speech.FAILED) instead of an amber notice; 410 and 403 as before.
+        for ((failure, speech) in listOf(network to ChatEntry.Speech.FAILED, ChatFailure.NotSentOnly to null,
+                ChatFailure.Check to null)) {
             val log = ChatLog()
             val (id, _) = log.voiceStarted()
             log.voiceTranscribed(id, "hola")
             val (answer, _) = log.voiceAnswered(id, "respuesta")
             VoiceFailures.apply(log, id, answer, VoiceStep.SYNTHESIS, failure, ::text)
             assertEquals(Status.SENT, log.entries.filterIsInstance<ChatEntry.User>().single().status)
-            assertEquals(null, log.entries.filterIsInstance<ChatEntry.Assistant>().single().speech)
+            assertEquals("$failure", speech, log.entries.filterIsInstance<ChatEntry.Assistant>().single().speech)
         }
         val log = ChatLog()
         val (id, _) = log.voiceStarted()
         log.voiceTranscribed(id, "hola")
         val (answer, _) = log.voiceAnswered(id, "respuesta")
         val change = VoiceFailures.apply(log, id, answer, VoiceStep.SYNTHESIS, network, ::text)
-        assertEquals(listOf("aviso NO_NETWORK"), change.added.map { (it as ChatEntry.Notice).text })
+        assertTrue("sin aviso ámbar", change.added.isEmpty())
     }
 
     @Test fun emptyClarificationUsesTheApprovedFallback() {

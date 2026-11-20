@@ -104,7 +104,14 @@ internal object VoiceTiming {
 
 /** A failed voice step applied to the conversation (stage B3): the same ChatFailures table as typed chat. */
 internal object VoiceFailures {
-    /** [text] resolves a WithNotice failure; 403 gives the provisional "Comprobando…" (resolved by the caller). */
+    /** Notices that ask the user to act: they stay even when only the voice failed. */
+    private val ACTION = setOf(CallText.UNAUTHORIZED, CallText.UNAUTHORIZED_REPEATED, CallText.CLOCK, CallText.CERTIFICATE)
+
+    /**
+     * [text] resolves a WithNotice failure; 403 gives the provisional "Comprobando…" (resolved by the caller).
+     * Synthesis or playback with the answer already shown: the discreet "No se pudo leer en voz alta." under it,
+     * no notice, except 403 and the notices that ask to act (401, clock, certificate; 410 leaves it to the card).
+     */
     fun apply(
         log: ChatLog,
         message: Long,
@@ -112,11 +119,17 @@ internal object VoiceFailures {
         step: VoiceStep,
         failure: ChatFailure,
         text: (ChatFailure.WithNotice) -> String,
-    ): ChatChange = when (failure) {
-        ChatFailure.Check -> log.voiceChecking(message, answer, step)
-        ChatFailure.NotSentOnly -> log.voiceFailed(message, answer, step, null)
-        is ChatFailure.WithNotice -> log.voiceFailed(message, answer, step, text(failure))
+    ): ChatChange = when {
+        quiet(step, failure, answer) -> log.voiceUnspoken(answer)
+        failure == ChatFailure.Check -> log.voiceChecking(message, answer, step)
+        failure == ChatFailure.NotSentOnly -> log.voiceFailed(message, answer, step, null)
+        else -> log.voiceFailed(message, answer, step, text(failure as ChatFailure.WithNotice))
     }
+
+    /** Only the voice failed, the answer is on screen and nothing asks the user to act. */
+    fun quiet(step: VoiceStep, failure: ChatFailure, answer: Long?): Boolean =
+        answer != null && (step == VoiceStep.SYNTHESIS || step == VoiceStep.PLAYBACK) &&
+            failure is ChatFailure.WithNotice && failure.text !in ACTION
 
     /** The backend's clarification, or [fallback] ("Hace falta aclarar la pregunta.") when it is empty. */
     fun clarification(text: String, fallback: String): String = text.trim().ifEmpty { fallback }

@@ -448,7 +448,7 @@ class MainActivity : AppCompatActivity() {
                     runOnUiThread {
                         if (response.isSuccessful && responseBody != null) {
                             val answer = try {
-                                answerOf(org.json.JSONObject(responseBody), responseBody)
+                                answerOf(org.json.JSONObject(responseBody), responseBody).text
                             } catch (e: Exception) { responseBody }
                             if (pairing.configured) {
                                 callErrors.onSuccess()
@@ -759,7 +759,8 @@ class MainActivity : AppCompatActivity() {
                     if (inChat) showChange(chatLog.voiceTranscribed(message, transcript.text, transcript.basicEngine))
                     setState(UiState.Thinking)
                 }
-                val answer = sendToOllama(transcript.text)
+                val reply = sendToOllama(transcript.text)
+                val answer = reply.text
                 runOnUiThread {
                     voiceTiming("answer")
                     voiceFlow.on(VoiceEvent.ANSWERED)
@@ -775,8 +776,15 @@ class MainActivity : AppCompatActivity() {
 
                 // 3. Piper synthesis.
                 runOnUiThread { setState(UiState.Synthesizing) }
-                // Pairing mode: the bubble keeps the sources, the voice does not read them (SpokenText).
-                val audioBytes = synthesizeSpeech(if (inChat) SpokenText.of(answer) else answer)
+                // Pairing mode: the bubble keeps the whole answer with its sources; the voice reads the backend's
+                // `speech`, or the answer without sources cut to 450 characters (SpokenAnswer). Shared-token mode:
+                // the whole answer, as before.
+                val audioBytes = try {
+                    synthesizeSpeech(if (inChat) SpokenAnswer.of(reply.text, reply.speech) else answer)
+                } catch (e: Exception) {
+                    if (e !is kotlinx.coroutines.CancellationException) voiceFailureLog("synthesis_failed", e)
+                    throw e
+                }
                 callErrors.onSuccess()
 
                 // 4. MediaPlayer playback.
@@ -814,6 +822,12 @@ class MainActivity : AppCompatActivity() {
     )
 
     /** Debug builds only: elapsed time since "Detener y enviar", engine and microphone. Never text or audio. */
+    /** Debug builds only: the failed call's exception type and HTTP status (no message, text or audio). */
+    private fun voiceFailureLog(step: String, error: Throwable) {
+        if (!BuildConfig.DEBUG) return
+        Log.d(VoiceDebugLog.TAG, VoiceDebugLog.failure(step, SystemClock.elapsedRealtime() - voiceT0, error))
+    }
+
     private fun voiceTiming(step: String) {
         if (!BuildConfig.DEBUG) return
         Log.d(VoiceDebugLog.TAG, VoiceDebugLog.line(step, SystemClock.elapsedRealtime() - voiceT0, voiceEngine,
@@ -879,17 +893,20 @@ class MainActivity : AppCompatActivity() {
             .build()
     }
 
-    /** The answer text; in pairing mode the returned session is kept (AssistantSession validates it). */
-    private fun answerOf(obj: org.json.JSONObject, body: String): String {
-        if (pairing.configured) {
-            val returned = if (obj.isNull("session_id")) null else obj.optString("session_id")
-            assistantSession = AssistantSession.next(assistantSession, returned)
-        }
-        return obj.optString("answer", body)
+    /**
+     * The answer, and in pairing mode the backend's `speech` (absent or null on an older backend: SpokenAnswer then
+     * cuts the answer itself) and the returned session (AssistantSession validates it).
+     */
+    private fun answerOf(obj: org.json.JSONObject, body: String): AssistantReply {
+        if (!pairing.configured) return AssistantReply(obj.optString("answer", body))
+        val returned = if (obj.isNull("session_id")) null else obj.optString("session_id")
+        assistantSession = AssistantSession.next(assistantSession, returned)
+        val speech = if (obj.isNull("speech")) null else obj.optString("speech")
+        return AssistantReply(obj.optString("answer", body), speech)
     }
 
     /** POST recognized text to the chat: the assistant in pairing mode, /api/v1/chat in shared-token mode. */
-    private fun sendToOllama(message: String): String {
+    private fun sendToOllama(message: String): AssistantReply {
         val baseUrl = backendUrl ?: throw IllegalStateException("Backend URL is not configured.")
         return okHttpClient.newCall(chatRequest(baseUrl, message)).execute().use { response ->
             val responseBody = response.body?.string() ?: ""
@@ -935,8 +952,9 @@ class MainActivity : AppCompatActivity() {
         if (wav.isEmpty()) {
             runOnUiThread {
                 voiceFlow.on(VoiceEvent.NO_AUDIO)
-                if (pairing.configured) voiceAnswer?.let { showChange(chatLog.speech(it, null)) }
-                voiceNotice(getString(R.string.voice_no_audio))
+                // Pairing mode: the answer is already shown, only the discreet label; shared-token mode: status line.
+                if (pairing.configured) showChange(chatLog.voiceUnspoken(voiceAnswer))
+                else updateStatus(getString(R.string.voice_no_audio))
                 setState(UiState.Ready)
             }
             return
@@ -972,10 +990,9 @@ class MainActivity : AppCompatActivity() {
                     voiceFlow.on(VoiceEvent.FAILED)
                     releaseMediaPlayer()
                     setState(UiState.Error)
-                    if (pairing.configured) {
-                        showChange(chatLog.voiceFailed(voiceMessage, voiceAnswer, VoiceStep.PLAYBACK,
-                            getString(R.string.voice_playback_failed)))
-                    } else updateStatus(getString(R.string.voice_playback_failed))
+                    // Pairing mode: the answer is already shown, only the discreet label (no notice).
+                    if (pairing.configured) showChange(chatLog.voiceUnspoken(voiceAnswer))
+                    else updateStatus(getString(R.string.voice_playback_failed))
                     false
                 }
                 prepareAsync()
