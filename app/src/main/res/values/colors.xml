@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dark palette (stage A). Contrast is checked by ThemeColorsTest. -->
+<resources>
+    <color name="itg_background">#0E1116</color>
+    <color name="itg_surface">#161B22</color>
+    <color name="itg_surface_raised">#1C232C</color>
+    <color name="itg_outline">#30363D</color>
+    <color name="itg_text_primary">#E6EDF3</color>
+    <color name="itg_text_secondary">#8B949E</color>
+    <color name="itg_accent">#3DDC97</color>
+    <color name="itg_on_accent">#0E1116</color>
+    <color name="itg_warning">#F2B84B</color>
+    <color name="itg_danger">#FF8A8F</color>
+    <color name="itg_bubble_user">#173A2C</color>
+</resources>

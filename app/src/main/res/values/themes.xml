@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Always dark (stage A). Every attribute exists at minSdk 24. -->
+    <style name="Theme.ITGlasses" parent="Theme.MaterialComponents.NoActionBar">
+        <item name="colorPrimary">@color/itg_accent</item>
+        <item name="colorPrimaryVariant">@color/itg_accent</item>
+        <item name="colorOnPrimary">@color/itg_on_accent</item>
+        <item name="colorSecondary">@color/itg_accent</item>
+        <item name="colorOnSecondary">@color/itg_on_accent</item>
+        <item name="colorSurface">@color/itg_surface</item>
+        <item name="colorOnSurface">@color/itg_text_primary</item>
+        <item name="colorError">@color/itg_danger</item>
+        <item name="colorControlNormal">@color/itg_text_secondary</item>
+        <item name="colorControlActivated">@color/itg_accent</item>
+        <item name="android:colorBackground">@color/itg_background</item>
+        <item name="android:windowBackground">@color/itg_background</item>
+        <item name="android:textColorPrimary">@color/itg_text_primary</item>
+        <item name="android:textColorSecondary">@color/itg_text_secondary</item>
+        <item name="android:textColorHint">@color/itg_text_secondary</item>
+        <item name="android:statusBarColor">@color/itg_background</item>
+        <item name="android:navigationBarColor">@color/itg_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

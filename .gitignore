@@ -6,9 +6,8 @@
 /.idea/
 /*.iml
 
-# Gradle cache and wrappers
+# Gradle cache
 /.gradle
-/gradle/wrapper/gradle-wrapper.properties
 
 # Build outputs (root and app module)
 /build/
@@ -45,3 +44,6 @@ generated/
 # Backup and temporary files
 *.bak
 *.tmp
+
+# Respaldos comprimidos locales
+*.zip

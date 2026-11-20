@@ -1,7 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Stage C: scrolling content on top, message bar fixed at the bottom (window uses adjustResize). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:orientation="vertical">
+
+<ScrollView
+    android:id="@+id/main_scroll"
+    android:layout_width="match_parent"
+    android:layout_height="0dp"
+    android:layout_weight="1"
     android:fillViewport="true">
 
     <LinearLayout
@@ -18,17 +27,63 @@
             android:textStyle="bold"
             android:layout_marginBottom="16dp"/>
 
-        <Button android:id="@+id/btn_pair" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:text="EMPAREJAR DISPOSITIVO"/>
-        <TextView android:id="@+id/tv_pairing" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:accessibilityLiveRegion="polite"/>
+        <!-- Pairing card. Texts come from PairingScreen/PairingTexts; the code's contentDescription
+             ("Código 4 8 2 9 1 3") is set from MainActivity because it changes with every request.
+             Stroke and dot colours follow the state's tone (PairingTones); the dot is decorative. -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/card_pairing"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            app:cardBackgroundColor="@color/itg_surface"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="0dp"
+            app:strokeWidth="1dp"
+            app:strokeColor="@color/itg_outline"
+            app:contentPadding="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <View android:id="@+id/status_dot" android:layout_width="10dp" android:layout_height="10dp"
+                        android:layout_marginEnd="10dp" android:background="@drawable/status_dot"
+                        android:importantForAccessibility="no" android:visibility="gone"/>
+                    <TextView android:id="@+id/tv_pairing_title" android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="wrap_content" android:textSize="18sp" android:textStyle="bold"
+                        android:accessibilityLiveRegion="polite" android:visibility="gone"/>
+                </LinearLayout>
+
+                <TextView android:id="@+id/tv_pairing_code" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:gravity="center" android:textSize="32sp"
+                    android:typeface="monospace" android:textIsSelectable="false"
+                    android:textColor="@color/itg_text_primary" android:letterSpacing="0.15"
+                    android:importantForAccessibility="yes" android:layout_marginTop="8dp"
+                    android:layout_marginBottom="8dp"
+                    android:visibility="gone"/>
+                <TextView android:id="@+id/tv_pairing" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:accessibilityLiveRegion="polite"/>
+                <TextView android:id="@+id/tv_pairing_note" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:visibility="gone"/>
+                <Button android:id="@+id/btn_pair" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:visibility="gone"/>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
         <TextView
             android:id="@+id/tv_backend_url"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:textSize="14sp"
-            android:textColor="#666"
+            android:textColor="@color/itg_text_secondary"
             android:layout_marginBottom="8dp"/>
 
         <androidx.appcompat.widget.AppCompatEditText
@@ -60,7 +115,7 @@
             android:id="@+id/btn_voice"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Voice"
+            android:text="@string/voice_button_start"
             android:layout_marginTop="8dp"/>
 
         <Button
@@ -77,40 +132,48 @@
             android:layout_marginTop="8dp"
             android:enabled="false"/>
 
-        <TextView
+        <!-- Meta Wearables. Hidden in the phone variant (PhoneWearablesIntegration). -->
+        <LinearLayout
+            android:id="@+id/meta_section"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/meta_mode_title"
-            android:textStyle="bold"
-            android:layout_marginTop="20dp"/>
+            android:orientation="vertical">
 
-        <TextView
-            android:id="@+id/tv_meta_status"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/meta_initializing"
-            android:layout_marginTop="6dp"/>
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/meta_mode_title"
+                android:textStyle="bold"
+                android:layout_marginTop="20dp"/>
 
-        <Button
-            android:id="@+id/btn_meta_register"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/meta_register"
-            android:enabled="false"/>
+            <TextView
+                android:id="@+id/tv_meta_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/meta_initializing"
+                android:layout_marginTop="6dp"/>
 
-        <Button
-            android:id="@+id/btn_meta_session"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/meta_start_session"
-            android:enabled="false"/>
+            <Button
+                android:id="@+id/btn_meta_register"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/meta_register"
+                android:enabled="false"/>
 
-        <Button
-            android:id="@+id/btn_meta_stop"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/meta_stop_session"
-            android:enabled="false"/>
+            <Button
+                android:id="@+id/btn_meta_session"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/meta_start_session"
+                android:enabled="false"/>
+
+            <Button
+                android:id="@+id/btn_meta_stop"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/meta_stop_session"
+                android:enabled="false"/>
+        </LinearLayout>
 
         <TextView
             android:id="@+id/tv_status"
@@ -137,19 +200,56 @@
             android:textSize="14sp"
             android:layout_marginTop="8dp"/>
 
-        <androidx.appcompat.widget.AppCompatEditText
-            android:id="@+id/et_message"
+        <!-- Pairing mode: welcome while Connected and nothing sent yet (ChatEmpty). Voice does not hide it. -->
+        <LinearLayout
+            android:id="@+id/chat_empty"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="@string/chat_placeholder"
-            android:layout_marginTop="8dp"/>
+            android:layout_marginTop="24dp"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:visibility="gone">
 
-        <Button
-            android:id="@+id/btn_send"
+            <ImageView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:padding="10dp"
+                android:background="@drawable/avatar_assistant"
+                android:src="@drawable/ic_assistant"
+                android:importantForAccessibility="no"/>
+
+            <TextView
+                android:id="@+id/tv_chat_empty_title"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:gravity="center"
+                android:text="@string/chat_empty_title"
+                android:textColor="@color/itg_text_primary"
+                android:textSize="16sp"
+                android:textStyle="bold"/>
+
+            <TextView
+                android:id="@+id/tv_chat_empty_subtitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:gravity="center"
+                android:text="@string/chat_empty_subtitle"
+                android:textColor="@color/itg_text_secondary"
+                android:textSize="14sp"/>
+        </LinearLayout>
+
+        <!-- Pairing mode: bubbles (ChatBubbles). Shared-token mode keeps tv_chat_output below, as before. -->
+        <LinearLayout
+            android:id="@+id/chat_messages"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/send"
-            android:layout_marginTop="8dp"/>
+            android:layout_marginTop="8dp"
+            android:orientation="vertical"
+            android:visibility="gone"/>
 
         <TextView
             android:id="@+id/tv_chat_output"
@@ -157,7 +257,44 @@
             android:layout_height="wrap_content"
             android:minHeight="100dp"
             android:layout_marginTop="8dp"
-            android:textColor="#000"/>
+            android:textColor="@color/itg_text_primary"/>
 
     </LinearLayout>
 </ScrollView>
+
+    <LinearLayout
+        android:id="@+id/message_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/itg_surface"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="8dp">
+
+        <androidx.appcompat.widget.AppCompatEditText
+            android:id="@+id/et_message"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/bg_input"
+            android:hint="@string/chat_placeholder"
+            android:inputType="textMultiLine|textCapSentences"
+            android:maxLines="5"
+            android:minHeight="44dp"
+            android:paddingStart="16dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="10dp"
+            android:textColor="@color/itg_text_primary"/>
+
+        <Button
+            android:id="@+id/btn_send"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="@string/send"/>
+    </LinearLayout>
+</LinearLayout>

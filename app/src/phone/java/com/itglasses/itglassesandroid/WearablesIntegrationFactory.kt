@@ -1,6 +1,7 @@
 package com.itglasses.itglassesandroid
 
 import android.content.Intent
+import android.view.View
 import com.itglasses.itglassesandroid.databinding.ActivityMainBinding
 
 internal object WearablesIntegrationFactory {
@@ -15,6 +16,7 @@ private class PhoneWearablesIntegration(
 ) : WearablesIntegration {
 
     override fun onCreate(intent: Intent) {
+        binding.metaSection.visibility = View.GONE  // No Meta DAT in the phone variant: hide the whole section.
         binding.tvMetaStatus.text =
             "Meta DAT is not included in the phone-only build. Phone audio remains available."
         binding.btnMetaRegister.isEnabled = false

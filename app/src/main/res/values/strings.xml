@@ -11,21 +11,112 @@
     <string name="voice_output">Voice Output</string>
     <string name="connect">Connect</string>
     <string name="disconnect">Disconnect</string>
-    <string name="send">Send</string>
+    <string name="send">Enviar</string>
     <string name="send_message">Send message</string>
     <string name="error_connection">Connection Error</string>
     <string name="error_no_backend">Backend not reachable</string>
     <string name="error_no_audio">Microphone permission denied</string>
     <string name="loading">Loading...</string>
-    <string name="chat_placeholder">Type a message...</string>
-    <string name="transcription_pending">Transcription will appear here</string>
-    <string name="transcription_empty">No speech recognized</string>
+    <string name="chat_placeholder">Escribe un mensaje…</string>
+    <string name="transcription_pending">Aquí aparecerá lo que digas</string>
+    <string name="transcription_empty">No se reconoció ninguna voz.</string>
     <string name="transcription_error">Transcription error</string>
-    <string name="ai_response_pending">AI response will appear here</string>
-    <string name="phone_audio_mode">Phone mode: phone microphone and speaker</string>
+    <string name="ai_response_pending">Aquí aparecerá la respuesta</string>
+    <string name="phone_audio_mode">Micrófono y altavoz del celular</string>
     <string name="meta_mode_title">Meta Wearables mode (device session only)</string>
     <string name="meta_initializing">Initializing Meta Wearables…</string>
     <string name="meta_register">Register with Meta AI</string>
     <string name="meta_start_session">Connect DAT session</string>
     <string name="meta_stop_session">Stop DAT session</string>
+    <!-- Emparejamiento y conexión del dispositivo (etapa 5). Claves: PairingText -> PairingTexts.kt. -->
+    <string name="pairing_registering_title">Registrando este celular…</string>
+    <string name="pairing_registering_detail">Conectando con el servidor de ITGlasses.</string>
+    <string name="pairing_expired_title">La solicitud caducó. Generando un código nuevo…</string>
+    <string name="pairing_removed_title">Este celular se eliminó del panel. Registrándolo de nuevo…</string>
+    <string name="pairing_pending_title">Dispositivo pendiente de aprobación</string>
+    <string name="pairing_pending_detail">Aprueba en el panel de ITGlasses el dispositivo que muestre este mismo código.</string>
+    <string name="pairing_pending_expires">La solicitud caduca en %1$s.</string>
+    <string name="pairing_code_spoken">Código %1$s</string>
+    <string name="pairing_connected_title">Conectado</string>
+    <string name="pairing_connected_detail">Este celular está aprobado: %1$s.</string>
+    <string name="pairing_connected_detail_unknown">Este celular está aprobado.</string>
+    <string name="pairing_blocked_title">Dispositivo bloqueado</string>
+    <string name="pairing_blocked_detail">Un administrador bloqueó este celular. Cuando lo desbloquee, pulsa «Comprobar de nuevo».</string>
+    <string name="pairing_denied_title">Solicitud rechazada</string>
+    <string name="pairing_denied_detail">Un administrador rechazó esta solicitud.</string>
+    <string name="pairing_offline_title">Sin conexión con el servidor</string>
+    <string name="pairing_offline_detail">Reintentando en %1$s s. Comprueba que el celular esté en la misma Wi-Fi que la PC.</string>
+    <string name="pairing_rate_limited_title">Demasiadas solicitudes pendientes</string>
+    <string name="pairing_rate_limited_detail">Reintentando en %1$s s.</string>
+    <string name="pairing_certificate_title">No se pudo verificar el servidor</string>
+    <string name="pairing_certificate_detail">El certificado HTTPS no es de confianza para esta APK.</string>
+    <string name="pairing_clock_title">La hora del celular no coincide</string>
+    <string name="pairing_clock_detail">Activa «Fecha y hora automáticas» en Ajustes y pulsa «Reintentar».</string>
+    <string name="pairing_failed_title">No se pudo completar el emparejamiento</string>
+    <string name="pairing_failed_detail">Inténtalo de nuevo en unos segundos.</string>
+    <string name="pairing_unconfigured_detail">Esta APK no tiene configurada la dirección HTTPS del servidor.</string>
+    <string name="pairing_call_checking">Comprobando el estado del dispositivo…</string>
+    <string name="pairing_forbidden_call">Esta función no está disponible para el celular.</string>
+    <string name="pairing_button_check_again">Comprobar de nuevo</string>
+    <string name="pairing_button_request_again">Solicitar de nuevo</string>
+    <string name="pairing_button_retry">Reintentar</string>
+    <!-- Fallos de chat y voz en modo emparejamiento. Claves: CallText -> CallTexts.kt. -->
+    <!-- "la misma Wi-Fi que la PC" es específico del piloto (servidor en la PC de la oficina). -->
+    <string name="call_no_network">Sin conexión con el servidor. Comprueba que el celular esté en la misma Wi-Fi que la PC e inténtalo de nuevo.</string>
+    <string name="call_no_response">No se obtuvo respuesta del servidor. Comprueba la red o inténtalo en un momento.</string>
+    <string name="call_timeout">El asistente tardó demasiado en responder. Inténtalo de nuevo.</string>
+    <string name="call_certificate">No se pudo verificar el servidor (certificado HTTPS).</string>
+    <string name="call_clock">La hora del celular no coincide con la del servidor. Activa «Fecha y hora automáticas».</string>
+    <string name="call_unauthorized">La autorización del celular se está renovando. Inténtalo de nuevo.</string>
+    <string name="call_unauthorized_repeated">Si persiste, revisa la fecha y hora del celular o avisa al administrador.</string>
+    <string name="call_removed">Este celular se eliminó del panel y se está registrando de nuevo. Revisa la tarjeta.</string>
+    <string name="call_audio_too_long">El audio es demasiado largo (máximo 30 segundos).</string>
+    <string name="call_rejected">El servidor no aceptó el mensaje. Revisa que no supere los 4000 caracteres.</string>
+    <string name="call_rate_limited">Demasiadas peticiones seguidas. Espera unos segundos e inténtalo de nuevo.</string>
+    <string name="call_server_error">El servidor de ITGlasses tuvo un error. Inténtalo de nuevo.</string>
+    <string name="call_unexpected_code">Respuesta inesperada del servidor (código %1$s).</string>
+    <string name="call_failed">No se pudo completar la petición. Inténtalo de nuevo.</string>
+    <string name="call_generating">Generando respuesta…</string>
+    <!-- Voz (etapa D). Comunes a los dos modos; textos solo del modo token compartido quedan en inglés. -->
+    <string name="voice_button_start">Hablar</string>
+    <string name="voice_button_stop">Detener</string>
+    <string name="voice_state_recording">Grabando… %1$d s</string>
+    <string name="voice_state_transcribing">Transcribiendo…</string>
+    <string name="voice_state_thinking">Pensando…</string>
+    <string name="voice_state_synthesizing">Preparando la voz…</string>
+    <string name="voice_state_speaking">Hablando…</string>
+    <string name="voice_state_ready">Listo</string>
+    <string name="voice_state_error">Error</string>
+    <string name="voice_mic_denied">Permiso de micrófono denegado.</string>
+    <string name="voice_mic_unsupported">Este celular no permite grabar audio en el formato necesario.</string>
+    <string name="voice_mic_unavailable">No se pudo iniciar el micrófono. Ciérralo en otras apps e inténtalo de nuevo.</string>
+    <string name="voice_recording_empty">La grabación quedó vacía. Inténtalo de nuevo.</string>
+    <string name="voice_saving">Guardando la grabación…</string>
+    <string name="voice_saved">Grabación guardada (%1$d s).</string>
+    <string name="voice_save_failed">No se pudo guardar la grabación.</string>
+    <string name="voice_clarification">Hace falta aclarar la pregunta.</string>
+    <string name="voice_answer_received">Respuesta recibida</string>
+    <string name="voice_no_audio">No hay audio para reproducir.</string>
+    <string name="voice_playing">Reproduciendo la respuesta…</string>
+    <string name="voice_playback_done">Reproducción terminada</string>
+    <string name="voice_playback_failed">No se pudo reproducir la respuesta.</string>
+    <!-- Discreet label under an answer already shown when only its voice failed (no amber notice). -->
+    <string name="voice_unspoken">No se pudo leer en voz alta.</string>
+    <!-- Conversación en burbujas (etapa C). -->
+    <string name="chat_generating_label">Generando respuesta</string>
+    <string name="chat_not_sent">No enviado</string>
+    <!-- Voz en la conversación (etapa B3): etiquetas con puntos animados; sin animaciones, voice_state_* con "…". -->
+    <string name="chat_transcribing_label">Transcribiendo</string>
+    <string name="chat_thinking_label">Pensando</string>
+    <!-- Voz 1: la transcripción vino del respaldo Vosk porque Whisper no estaba disponible. -->
+    <string name="chat_basic_engine">Motor de voz básico</string>
+    <!-- Bienvenida en la zona del chat: solo Conectado y antes del primer mensaje. -->
+    <string name="chat_empty_title">Hola, soy tu asistente de ITGlasses</string>
+    <string name="chat_empty_subtitle">Escribe una pregunta sobre tus equipos o usa la voz.</string>
+    <!-- Pantalla de voz (etapa B2, solo modo emparejamiento). -->
+    <string name="voice_screen_listening">Escuchando…</string>
+    <string name="voice_screen_seconds">%1$d s</string>
+    <string name="voice_screen_stop">Detener y enviar</string>
+    <string name="voice_screen_cancel">Cancelar</string>
+    <string name="voice_screen_hint">Toca Detener y enviar cuando termines.</string>
 </resources>
