@@ -21,7 +21,7 @@ class ITGlassesApplication : Application() {
         metaSdkReady = result.isSuccess
         if (result.isFailure) {
             metaInitializationError = result.errorOrNull()?.description
-                ?: "The Meta Wearables SDK could not be initialized."
+                ?: "No se pudo iniciar el SDK de Meta Wearables."
             Log.e(TAG, "Meta Wearables SDK initialization failed: $metaInitializationError")
         }
     }

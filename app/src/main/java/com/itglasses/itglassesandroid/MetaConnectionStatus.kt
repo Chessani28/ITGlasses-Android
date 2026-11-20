@@ -11,28 +11,28 @@ internal object MetaConnectionStatus {
         if (!error.isNullOrBlank()) return "Meta Wearables: $error"
 
         when (sessionState) {
-            "STARTING" -> return "DAT session starting. Phone audio remains unchanged."
-            "STARTED" -> return "DAT session active; glasses audio is not enabled. Phone mode remains available."
-            "PAUSED" -> return "DAT session paused. Phone mode remains available."
-            "STOPPING" -> return "DAT session stopping."
+            "STARTING" -> return "Iniciando sesión DAT. El audio sigue en el teléfono."
+            "STARTED" -> return "Sesión DAT activa; el audio de los lentes no está habilitado. El modo teléfono sigue disponible."
+            "PAUSED" -> return "Sesión DAT en pausa. El modo teléfono sigue disponible."
+            "STOPPING" -> return "Cerrando sesión DAT."
         }
 
         return when (registrationState) {
             "UNAVAILABLE" ->
-                "No Meta wearable is available. Pair supported glasses in Meta AI; phone mode remains available."
+                "No hay lentes Meta disponibles. Empareja unos lentes compatibles en Meta AI; el modo teléfono sigue disponible."
             "AVAILABLE" ->
-                "A Meta wearable is available. Register this app through Meta AI."
+                "Hay lentes Meta disponibles. Registra esta app desde Meta AI."
             "REGISTERING" ->
-                "Registering with Meta AI…"
+                "Registrando en Meta AI…"
             "REGISTERED" -> if (connectedDevices > 0) {
-                "DAT reports $connectedDevices connected device(s). Phone microphone and speaker remain selected."
+                "DAT reporta $connectedDevices dispositivo(s) conectado(s). Se siguen usando el micrófono y la bocina del teléfono."
             } else {
-                "Registered, but no compatible Meta device is connected. Phone mode remains available."
+                "Registrada, pero no hay lentes Meta compatibles conectados. El modo teléfono sigue disponible."
             }
             "UNREGISTERING" ->
-                "Unregistering from Meta AI…"
+                "Quitando el registro de Meta AI…"
             else ->
-                "Meta Wearables status is unavailable. Phone mode remains available."
+                "No se conoce el estado de Meta Wearables. El modo teléfono sigue disponible."
         }
     }
 }

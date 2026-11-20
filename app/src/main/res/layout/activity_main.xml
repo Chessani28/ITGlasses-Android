@@ -19,7 +19,7 @@
             android:layout_marginBottom="16dp"/>
 
         <Button android:id="@+id/btn_pair" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:text="EMPAREJAR DISPOSITIVO"/>
+            android:layout_height="wrap_content" android:text="@string/pair_device"/>
         <TextView android:id="@+id/tv_pairing" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:accessibilityLiveRegion="polite"/>
 
@@ -60,7 +60,7 @@
             android:id="@+id/btn_voice"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Voice"
+            android:text="@string/voice_button"
             android:layout_marginTop="8dp"/>
 
         <Button

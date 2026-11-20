@@ -52,7 +52,7 @@ internal class MetaWearablesIntegration(
                 if (granted) {
                     action?.invoke()
                 } else {
-                    registrationError = "Bluetooth permission was denied. Phone mode remains available."
+                    registrationError = "Se negó el permiso de Bluetooth. El modo teléfono sigue disponible."
                     renderStatus()
                 }
             }
@@ -62,7 +62,7 @@ internal class MetaWearablesIntegration(
             handleRegistrationIntent(intent)
         } else {
             registrationError = metaApplication.metaInitializationError
-                ?: "Meta Wearables SDK is unavailable. Phone mode remains available."
+                ?: "El SDK de Meta Wearables no está disponible. El modo teléfono sigue disponible."
             renderStatus()
         }
     }
@@ -128,7 +128,7 @@ internal class MetaWearablesIntegration(
     override fun register() {
         withBluetoothPermission {
             if (!metaApplication.metaSdkReady) {
-                registrationError = "Meta Wearables SDK is unavailable. Phone mode remains available."
+                registrationError = "El SDK de Meta Wearables no está disponible. El modo teléfono sigue disponible."
                 renderStatus()
                 return@withBluetoothPermission
             }
@@ -141,12 +141,12 @@ internal class MetaWearablesIntegration(
     override fun startSession() {
         withBluetoothPermission {
             if (registrationStateName != RegistrationState.REGISTERED.name) {
-                registrationError = "Register this app with Meta AI before starting a DAT session."
+                registrationError = "Registra esta app en Meta AI antes de iniciar la sesión DAT."
                 renderStatus()
                 return@withBluetoothPermission
             }
             if (connectedDevices == 0) {
-                registrationError = "No connected Meta device is available. Phone mode remains available."
+                registrationError = "No hay lentes Meta conectados. El modo teléfono sigue disponible."
                 renderStatus()
                 return@withBluetoothPermission
             }
@@ -157,7 +157,7 @@ internal class MetaWearablesIntegration(
             Wearables.createSession(AutoDeviceSelector())
                 .onFailure { error, _ ->
                     registrationError = if (error == DeviceSessionError.NO_ELIGIBLE_DEVICE) {
-                        "No compatible connected Meta device is available."
+                        "No hay lentes Meta compatibles conectados."
                     } else {
                         error.description
                     }
@@ -180,13 +180,13 @@ internal class MetaWearablesIntegration(
                         session.errors.collect { error ->
                             sessionError = when (error) {
                                 DeviceSessionError.NO_ELIGIBLE_DEVICE ->
-                                    "No compatible connected Meta device is available."
+                                    "No hay lentes Meta compatibles conectados."
                                 DeviceSessionError.INSUFFICIENT_SDK_VERSION ->
-                                    "Update this app to a supported Meta Wearables SDK version."
+                                    "Actualiza la app a una versión compatible del SDK de Meta Wearables."
                                 DeviceSessionError.DAT_APP_ON_THE_GLASSES_UPDATE_REQUIRED ->
-                                    "Update the DAT integration from Meta AI app connections."
+                                    "Actualiza la integración DAT desde las conexiones de la app Meta AI."
                                 DeviceSessionError.DWA_UNAVAILABLE ->
-                                    "The DAT integration is unavailable. Check Meta AI setup."
+                                    "La integración DAT no está disponible. Revisa la configuración de Meta AI."
                                 else -> error.description
                             }
                             renderStatus()
@@ -225,7 +225,7 @@ internal class MetaWearablesIntegration(
         val sessionActive = currentSession != null
         binding.tvMetaStatus.text = if (!metaApplication.metaSdkReady) {
             metaApplication.metaInitializationError
-                ?: "Meta Wearables SDK is unavailable. Phone mode remains available."
+                ?: "El SDK de Meta Wearables no está disponible. El modo teléfono sigue disponible."
         } else {
             MetaConnectionStatus.message(
                 registrationState = registrationStateName,

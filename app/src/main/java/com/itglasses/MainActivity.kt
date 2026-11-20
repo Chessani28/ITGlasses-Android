@@ -99,12 +99,12 @@ class MainActivity : AppCompatActivity() {
             val busy = state != UiState.Idle && state != UiState.Ready && state != UiState.Error
             binding.btnVoice.isEnabled = !busy
             binding.tvStatus.text = when (state) {
-                UiState.Recording -> "Recording..."
-                UiState.Transcribing -> "Transcribing..."
-                UiState.Thinking -> "Thinking..."
-                UiState.Synthesizing -> "Synthesizing..."
-                UiState.Speaking -> "Speaking..."
-                UiState.Ready -> "Ready"
+                UiState.Recording -> "Grabando…"
+                UiState.Transcribing -> "Transcribiendo…"
+                UiState.Thinking -> "Pensando…"
+                UiState.Synthesizing -> "Preparando voz…"
+                UiState.Speaking -> "Hablando…"
+                UiState.Ready -> "Listo"
                 UiState.Error -> "Error"
                 UiState.Idle -> binding.tvStatus.text.toString()
             }
@@ -112,6 +112,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        isRecording = false // el hilo de grabación termina y libera el micrófono
         if (::wearablesIntegration.isInitialized) wearablesIntegration.onDestroy()
         super.onDestroy()
         releaseMediaPlayer()
@@ -126,7 +127,7 @@ class MainActivity : AppCompatActivity() {
             if (granted) {
                 startRecording()
             } else {
-                updateStatus("Microphone permission denied")
+                updateStatus("Permiso de micrófono denegado")
             }
         }
         activeToken = BackendConfiguration.getStoredToken(this)
@@ -143,7 +144,7 @@ class MainActivity : AppCompatActivity() {
             if (urlInput.isNotEmpty()) {
                 val success = BackendConfiguration.setCustomUrl(this, urlInput)
                 if (!success) {
-                    updateStatus("Invalid backend URL. Only private LAN or loopback addresses allowed in debug.")
+                    updateStatus("URL del servidor no válida. En debug solo se permiten direcciones de red local o 127.0.0.1.")
                     return@setOnClickListener
                 }
             } else {
@@ -239,10 +240,10 @@ class MainActivity : AppCompatActivity() {
     private fun connectToBackend() {
         val baseUrl = backendUrl
         if (baseUrl == null) {
-            updateStatus("Backend URL is not configured or invalid.")
+            updateStatus("La URL del servidor no está configurada o no es válida.")
             return
         }
-        updateStatus("Connecting to $baseUrl...")
+        updateStatus("Conectando a $baseUrl…")
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val request = Request.Builder()
@@ -260,40 +261,40 @@ class MainActivity : AppCompatActivity() {
                                     org.json.JSONObject(responseBody).optString("model", "")
                                 } catch (_: Exception) { "" }
                                 val details = if (provider.isNotEmpty()) " ($provider: $model)" else ""
-                                updateStatus("Connected to backend$details")
+                                updateStatus("Conectado al servidor$details")
                                 binding.btnConnect.isEnabled = false
                                 binding.btnDisconnect.isEnabled = true
                             }
                             401 -> {
-                                updateStatus("Authentication failed (HTTP 401): Check API Bearer token.")
+                                updateStatus("Error de autenticación (HTTP 401): revisa el token.")
                             }
                             503 -> {
-                                updateStatus("Backend service unavailable (HTTP 503): LLM provider offline.")
+                                updateStatus("Servidor no disponible (HTTP 503): el modelo no está en línea.")
                             }
                             else -> {
-                                updateStatus("Backend returned HTTP ${response.code}")
+                                updateStatus("El servidor respondió HTTP ${response.code}")
                             }
                         }
                     }
                 }
             } catch (e: java.net.SocketTimeoutException) {
-                runOnUiThread { updateStatus("Connection timed out connecting to $baseUrl") }
+                runOnUiThread { updateStatus("Se agotó el tiempo al conectar con $baseUrl") }
             } catch (e: java.net.ConnectException) {
-                runOnUiThread { updateStatus("Backend unreachable at $baseUrl: Connection refused") }
+                runOnUiThread { updateStatus("No se pudo conectar con $baseUrl: conexión rechazada") }
             } catch (e: java.net.UnknownHostException) {
-                runOnUiThread { updateStatus("Backend host unknown: ${e.message}") }
+                runOnUiThread { updateStatus("Servidor desconocido: ${e.message}") }
             } catch (e: Exception) {
-                runOnUiThread { updateStatus("Connection error: ${e.javaClass.simpleName}: ${e.message}") }
+                runOnUiThread { updateStatus("Error de conexión: ${e.javaClass.simpleName}: ${e.message}") }
             }
         }
     }
 
     private fun authenticationMessage() = if (pairing.managed)
-        "Autorización del dispositivo no válida" else "Authentication failed (HTTP 401): Check API Bearer token."
+        "Autorización del dispositivo no válida" else "Error de autenticación (HTTP 401): revisa el token."
 
     private fun disconnectFromBackend() {
         assistantSessionId = null
-        updateStatus("Disconnected")
+        updateStatus("Desconectado")
         binding.btnConnect.isEnabled = true
         binding.btnDisconnect.isEnabled = false
     }
@@ -301,32 +302,31 @@ class MainActivity : AppCompatActivity() {
     private fun sendMessage() {
         val baseUrl = backendUrl
         if (baseUrl == null) {
-            updateStatus("Backend URL is not configured for this build.")
+            updateStatus("La URL del servidor no está configurada en esta versión.")
             return
         }
         val message = binding.etMessage.text.toString().trim()
         if (message.isEmpty()) return
 
         binding.btnSend.isEnabled = false
-        updateStatus("Generating response...")
+        updateStatus("Generando respuesta…")
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val reply = askAssistant(message)
                 runOnUiThread {
-                    binding.tvChatOutput.text =
-                        "${binding.tvChatOutput.text}\n$message -> ${AssistantProtocol.displayText(reply)}"
+                    appendChat("Tú: $message\nITGlasses: ${AssistantProtocol.displayText(reply)}")
                     binding.etMessage.text?.clear()
-                    updateStatus("Connected")
+                    updateStatus("Conectado")
                 }
             } catch (e: BackendHttpException) {
                 runOnUiThread {
-                    binding.tvChatOutput.text = "${binding.tvChatOutput.text}\nError: ${e.message}"
-                    updateStatus(if (e.code == 401) "Authentication failed (HTTP 401)" else "Connected")
+                    appendChat("Error: ${e.message}")
+                    updateStatus(if (e.code == 401) "Error de autenticación (HTTP 401)" else "Conectado")
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    binding.tvChatOutput.text = "${binding.tvChatOutput.text}\nError: ${e.javaClass.simpleName}: ${e.message}"
-                    updateStatus("Connected")
+                    appendChat("Error: ${e.javaClass.simpleName}: ${e.message}")
+                    updateStatus("Conectado")
                 }
             } finally {
                 runOnUiThread { binding.btnSend.isEnabled = true }
@@ -350,12 +350,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startRecording() {
-        if (isRecording) return
+        // audioRecord != null: la grabación anterior aún se está cerrando.
+        if (isRecording || audioRecord != null) return
         if (ContextCompat.checkSelfPermission(
             this,
             Manifest.permission.RECORD_AUDIO
         ) != PackageManager.PERMISSION_GRANTED) {
-            updateStatus("Microphone permission denied")
+            updateStatus("Permiso de micrófono denegado")
             return
         }
 
@@ -364,7 +365,7 @@ class MainActivity : AppCompatActivity() {
         val audioFormat = AudioFormat.ENCODING_PCM_16BIT
         val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
         if (bufferSize <= 0) {
-            updateStatus("AudioRecord unsupported")
+            updateStatus("Este teléfono no soporta la grabación de audio")
             return
         }
 
@@ -376,7 +377,7 @@ class MainActivity : AppCompatActivity() {
             bufferSize
         )
         if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
-            updateStatus("AudioRecord init failed")
+            updateStatus("No se pudo iniciar el micrófono")
             audioRecord?.release()
             audioRecord = null
             return
@@ -385,8 +386,8 @@ class MainActivity : AppCompatActivity() {
         recordedPcm.reset()
         isRecording = true
         recordingStartMs = System.currentTimeMillis()
-        binding.btnVoice.text = "Stop"
-        updateStatus("Recording... 0s")
+        binding.btnVoice.text = "Detener"
+        updateStatus("Grabando… 0 s")
         audioRecord?.startRecording()
 
         recordingThread = Thread {
@@ -408,53 +409,56 @@ class MainActivity : AppCompatActivity() {
                 // Maximum recording duration of 30 seconds: stop and save automatically.
                 if (elapsed >= MAX_DURATION_MS) {
                     isRecording = false
-                    runOnUiThread {
-                        binding.btnVoice.text = "Voice"
-                        finishRecording()
-                    }
                     break
                 }
 
                 // Recording state and duration display, updated once per second.
                 if (now - lastStatusMs >= 1000) {
                     lastStatusMs = now
-                    runOnUiThread { updateStatus("Recording... ${elapsed / 1000}s") }
+                    runOnUiThread { updateStatus("Grabando… ${elapsed / 1000} s") }
                 }
             }
+            // El hilo ya no lee del micrófono: es seguro cerrarlo en el hilo de UI.
+            runOnUiThread { finishRecording() }
         }
         recordingThread?.start()
     }
 
+    // Ya no se espera al hilo con join() en el hilo de UI (podía congelar la
+    // pantalla hasta 1 s): el hilo termina su última lectura y llama a
+    // finishRecording() por su cuenta.
     private fun stopRecording() {
         isRecording = false
-        recordingThread?.join(1000)
-        recordingThread = null
-        finishRecording()
+        binding.btnVoice.isEnabled = false
+        updateStatus("Guardando…")
     }
 
     private fun finishRecording() {
-        if (audioRecord == null) return // Already finalized (e.g. auto-stop path)
+        if (audioRecord == null) return // Already finalized
 
         // Proper microphone resource cleanup: stop then release.
-        audioRecord?.stop()
+        try { audioRecord?.stop() } catch (_: IllegalStateException) { }
         audioRecord?.release()
         audioRecord = null
+        recordingThread = null
+        if (isDestroyed) return
 
-        binding.btnVoice.text = "Voice"
+        binding.btnVoice.text = "Hablar"
+        binding.btnVoice.isEnabled = true
         val pcm = synchronized(recordedPcm) { recordedPcm.toByteArray() }
         if (pcm.isEmpty()) {
-            updateStatus("Error: empty recording")
+            updateStatus("Error: la grabación está vacía")
             return
         }
 
-        updateStatus("Saving...")
+        updateStatus("Guardando…")
         val wav = pcmToWav(pcm, 16000, 1, 16)
         try {
             // Temporary private app storage (cache dir).
             val file = File(cacheDir, "recording.wav")
             FileOutputStream(file).use { it.write(wav) }
             val duration = pcm.size / (16000 * 2)
-            updateStatus("Saved: ${file.name} ${file.length()} bytes, ~${duration}s")
+            updateStatus("Grabación lista: ~${duration} s")
             // Run the full voice pipeline off the UI thread:
             // transcribe → assistant → Piper synthesis → MediaPlayer playback.
             isProcessing = true
@@ -485,7 +489,7 @@ class MainActivity : AppCompatActivity() {
                     runOnUiThread {
                         binding.tvTranscription.text = getString(R.string.transcription_empty)
                         setState(UiState.Ready)
-                        updateStatus("Completed: no speech recognized")
+                        updateStatus("No se reconoció voz")
                     }
                     return@launch
                 }
@@ -496,7 +500,7 @@ class MainActivity : AppCompatActivity() {
                     runOnUiThread {
                         binding.tvTranscription.text = transcript.clarification
                         setState(UiState.Ready)
-                        updateStatus("Clarification required")
+                        updateStatus("Hace falta aclarar la pregunta")
                     }
                     return@launch
                 }
@@ -506,7 +510,7 @@ class MainActivity : AppCompatActivity() {
                 val reply = askAssistant(transcript.text)
                 runOnUiThread {
                     binding.tvAiResponse.text = AssistantProtocol.displayText(reply)
-                    updateStatus("AI response received")
+                    updateStatus("Respuesta recibida")
                 }
 
                 // 3. Piper synthesis (el backend limpia el texto para voz).
@@ -540,7 +544,7 @@ class MainActivity : AppCompatActivity() {
 
     /** POST raw WAV to /api/v1/voice/transcribe and parse the JSON response. */
     private fun transcribeWavRaw(wav: ByteArray): TranscriptResult {
-        val baseUrl = backendUrl ?: throw IllegalStateException("Backend URL is not configured.")
+        val baseUrl = backendUrl ?: throw IllegalStateException("La URL del servidor no está configurada.")
         val body = wav.toRequestBody("audio/wav".toMediaType())
         val request = Request.Builder()
             .url("$baseUrl$TRANSCRIBE_ENDPOINT")
@@ -552,7 +556,7 @@ class MainActivity : AppCompatActivity() {
                 if (response.code == 401) {
                     throw RuntimeException(authenticationMessage())
                 }
-                throw RuntimeException("Transcribe HTTP ${response.code} ${response.message ?: ""}")
+                throw RuntimeException("Transcripción HTTP ${response.code} ${response.message ?: ""}")
             }
             val obj = org.json.JSONObject(responseBody)
             TranscriptResult(
@@ -568,7 +572,7 @@ class MainActivity : AppCompatActivity() {
      * que devuelve, para que la siguiente pregunta continúe la conversación.
      */
     private fun askAssistant(message: String): AssistantReply {
-        val baseUrl = backendUrl ?: throw IllegalStateException("Backend URL is not configured.")
+        val baseUrl = backendUrl ?: throw IllegalStateException("La URL del servidor no está configurada.")
         val body = AssistantProtocol.requestBody(message, assistantSessionId)
             .toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
@@ -579,7 +583,7 @@ class MainActivity : AppCompatActivity() {
             val responseBody = response.body?.string() ?: ""
             if (!response.isSuccessful) {
                 if (response.code == 401) throw BackendHttpException(401, authenticationMessage())
-                throw BackendHttpException(response.code, "Assistant HTTP ${response.code} ${response.message}")
+                throw BackendHttpException(response.code, "Asistente HTTP ${response.code} ${response.message}")
             }
             AssistantProtocol.parse(responseBody).also { reply ->
                 reply.sessionId?.let { assistantSessionId = it }
@@ -589,7 +593,7 @@ class MainActivity : AppCompatActivity() {
 
     /** POST text to the Piper synthesis endpoint /api/v1/voice/synthesize and return WAV bytes. */
     private fun synthesizeSpeech(text: String): ByteArray {
-        val baseUrl = backendUrl ?: throw IllegalStateException("Backend URL is not configured.")
+        val baseUrl = backendUrl ?: throw IllegalStateException("La URL del servidor no está configurada.")
         // Voz, hablante y velocidad los decide el backend (sus valores por defecto),
         // así cambiar de voz en el servidor no rompe la app.
         val json = org.json.JSONObject()
@@ -605,7 +609,7 @@ class MainActivity : AppCompatActivity() {
                 if (response.code == 401) {
                     throw RuntimeException(authenticationMessage())
                 }
-                throw RuntimeException("Synthesize HTTP ${response.code} ${response.message ?: ""}")
+                throw RuntimeException("Voz HTTP ${response.code} ${response.message ?: ""}")
             }
             response.body?.bytes() ?: byteArrayOf()
         }
@@ -616,7 +620,7 @@ class MainActivity : AppCompatActivity() {
         if (wav.isEmpty()) {
             runOnUiThread {
                 setState(UiState.Ready)
-                updateStatus("No audio to play")
+                updateStatus("No hay audio para reproducir")
             }
             return
         }
@@ -635,17 +639,17 @@ class MainActivity : AppCompatActivity() {
                 setOnPreparedListener { mp ->
                     mp.start()
                     setState(UiState.Speaking)
-                    updateStatus("Playing response")
+                    updateStatus("Reproduciendo respuesta")
                 }
                 setOnCompletionListener {
                     releaseMediaPlayer()
                     setState(UiState.Ready)
-                    updateStatus("Playback complete")
+                    updateStatus("Listo")
                 }
                 setOnErrorListener { _, _, _ ->
                     releaseMediaPlayer()
                     setState(UiState.Error)
-                    updateStatus("Playback error")
+                    updateStatus("Error al reproducir el audio")
                     false
                 }
                 prepareAsync()
@@ -659,6 +663,11 @@ class MainActivity : AppCompatActivity() {
             it.release()
         }
         mediaPlayer = null
+    }
+
+    /** Agrega al chat de texto conservando solo los mensajes más recientes. */
+    private fun appendChat(entry: String) {
+        binding.tvChatOutput.text = ChatTranscript.append(binding.tvChatOutput.text.toString(), entry)
     }
 
     private fun updateStatus(text: String) {

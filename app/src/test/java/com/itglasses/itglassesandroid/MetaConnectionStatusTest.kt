@@ -9,23 +9,23 @@ class MetaConnectionStatusTest {
     fun `registered app with no device remains explicitly disconnected`() {
         val message = MetaConnectionStatus.message("REGISTERED", 0, null, null)
 
-        assertTrue(message.contains("no compatible Meta device is connected"))
-        assertTrue(message.contains("Phone mode remains available"))
+        assertTrue(message.contains("no hay lentes Meta compatibles conectados"))
+        assertTrue(message.contains("El modo teléfono sigue disponible"))
     }
 
     @Test
     fun `reported device does not switch phone audio route`() {
         val message = MetaConnectionStatus.message("REGISTERED", 1, null, null)
 
-        assertTrue(message.contains("DAT reports 1 connected device"))
-        assertTrue(message.contains("Phone microphone and speaker remain selected"))
+        assertTrue(message.contains("DAT reporta 1 dispositivo"))
+        assertTrue(message.contains("Se siguen usando el micrófono y la bocina del teléfono"))
     }
 
     @Test
     fun `active session does not claim that glasses audio is enabled`() {
         val message = MetaConnectionStatus.message("REGISTERED", 1, "STARTED", null)
 
-        assertTrue(message.contains("glasses audio is not enabled"))
-        assertTrue(message.contains("Phone mode remains available"))
+        assertTrue(message.contains("el audio de los lentes no está habilitado"))
+        assertTrue(message.contains("El modo teléfono sigue disponible"))
     }
 }

@@ -16,7 +16,7 @@ private class PhoneWearablesIntegration(
 
     override fun onCreate(intent: Intent) {
         binding.tvMetaStatus.text =
-            "Meta DAT is not included in the phone-only build. Phone audio remains available."
+            "Esta versión no incluye Meta DAT; se usa el micrófono y la bocina del teléfono."
         binding.btnMetaRegister.isEnabled = false
         binding.btnMetaSession.isEnabled = false
         binding.btnMetaStop.isEnabled = false
