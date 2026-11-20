@@ -15,6 +15,8 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -163,6 +165,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        applySystemBarInsets()
         // The message bar is fixed at the bottom: resize the content so the keyboard never covers it.
         @Suppress("DEPRECATION")
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
@@ -651,6 +654,23 @@ class MainActivity : AppCompatActivity() {
      */
     private fun voiceStartFailed(text: String) = voiceNotice(text)
 
+    /**
+     * Con targetSdk 35+ la ventana se dibuja detrás de las barras del sistema (edge-to-edge) y desde API 36 ya no
+     * se puede desactivar; además adjustResize deja de redimensionar. Se deja espacio para la barra de estado, la
+     * de navegación, el notch y el teclado, así la barra de mensaje sigue visible al escribir.
+     */
+    private fun applySystemBarInsets() {
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { view, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or
+                    WindowInsetsCompat.Type.displayCutout() or
+                    WindowInsetsCompat.Type.ime()
+            )
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            WindowInsetsCompat.CONSUMED
+        }
+    }
+
     private fun stopRecording() {
         isRecording = false
         recordingThread?.join(1000)
@@ -909,9 +929,8 @@ class MainActivity : AppCompatActivity() {
         val baseUrl = backendUrl ?: throw IllegalStateException("Backend URL is not configured.")
         val json = org.json.JSONObject()
             .put("text", text)
-            .put("voice", "es_ES-sharvard-medium")
-            .put("speaker", 0)
-            .put("speed", 1.0)
+            // Voz, hablante y velocidad: los valores por defecto del backend, así cambiar la voz en el
+            // servidor no rompe la app (antes, una voz distinta daba 422).
             .toString()
         val body = json.toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
