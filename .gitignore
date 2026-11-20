@@ -44,3 +44,6 @@ generated/
 # Backup and temporary files
 *.bak
 *.tmp
+
+# Respaldos comprimidos locales
+*.zip

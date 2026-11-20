@@ -32,7 +32,7 @@ class VoiceWiringTest {
         assertTrue(activity.contains("InputLock.of("))
         for (call in listOf("chatLog.voiceStarted()", "chatLog.voiceNoSpeech(", "chatLog.voiceClarification(",
                 "chatLog.voiceTranscribed(", "chatLog.voiceAnswered(", "ChatEntry.Speech.SPEAKING", "VoiceFailures.apply(",
-                "VoiceStep.PLAYBACK")) {
+                "chatLog.voiceUnspoken(")) {
             assertTrue(call, activity.contains(call))
         }
     }
