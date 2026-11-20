@@ -39,11 +39,18 @@ class MainActivity : AppCompatActivity() {
     private val backendUrl: String?
         get() = if (pairing.managed) pairing.origin else BackendConfiguration.getBaseUrl(this)
     private val STATUS_ENDPOINT = "/api/v1/status"
-    private val CHAT_ENDPOINT = "/api/v1/chat"
+    private val ASSISTANT_ENDPOINT = AssistantProtocol.ENDPOINT
     private val TRANSCRIBE_ENDPOINT = "/api/v1/voice/transcribe"
     private val SYNTHESIZE_ENDPOINT = "/api/v1/voice/synthesize"
 
     @Volatile private var activeToken: String? = null
+
+    // Conversación con el cerebro, compartida por texto y voz, para que los
+    // seguimientos ("¿y el siguiente paso?") conserven el contexto.
+    @Volatile private var assistantSessionId: String? = null
+
+    /** Error HTTP del backend con su código, para mostrar el mensaje correcto. */
+    private class BackendHttpException(val code: Int, message: String) : RuntimeException(message)
 
     private val okHttpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -190,6 +197,7 @@ class MainActivity : AppCompatActivity() {
                     if (state == "active") {
                         BackendConfiguration.saveToken(this@MainActivity, null)
                         activeToken = null
+                        assistantSessionId = null
                         binding.etApiToken.text?.clear()
                         pairingControls()
                         binding.btnPair.isEnabled = false
@@ -284,6 +292,7 @@ class MainActivity : AppCompatActivity() {
         "Autorización del dispositivo no válida" else "Authentication failed (HTTP 401): Check API Bearer token."
 
     private fun disconnectFromBackend() {
+        assistantSessionId = null
         updateStatus("Disconnected")
         binding.btnConnect.isEnabled = true
         binding.btnDisconnect.isEnabled = false
@@ -302,38 +311,25 @@ class MainActivity : AppCompatActivity() {
         updateStatus("Generating response...")
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val json = org.json.JSONObject().put("message", message).toString()
-                val body = json.toRequestBody("application/json".toMediaType())
-                val request = Request.Builder()
-                    .url("$baseUrl$CHAT_ENDPOINT")
-                    .post(body)
-                    .build()
-                okHttpClient.newCall(request).execute().use { response ->
-                    val responseBody = response.body?.string()
-                    runOnUiThread {
-                        if (response.isSuccessful && responseBody != null) {
-                            val answer = try {
-                                org.json.JSONObject(responseBody).optString("answer", responseBody)
-                            } catch (e: Exception) { responseBody }
-                            binding.tvChatOutput.text = "${binding.tvChatOutput.text}\n$message -> $answer"
-                            binding.etMessage.text?.clear()
-                            updateStatus("Connected")
-                        } else if (response.code == 401) {
-                            binding.tvChatOutput.text = "${binding.tvChatOutput.text}\nError: ${authenticationMessage()}"
-                            updateStatus("Authentication failed (HTTP 401)")
-                        } else {
-                            binding.tvChatOutput.text = "${binding.tvChatOutput.text}\nError: HTTP ${response.code} ${responseBody ?: ""}"
-                            updateStatus("Connected")
-                        }
-                        binding.btnSend.isEnabled = true
-                    }
+                val reply = askAssistant(message)
+                runOnUiThread {
+                    binding.tvChatOutput.text =
+                        "${binding.tvChatOutput.text}\n$message -> ${AssistantProtocol.displayText(reply)}"
+                    binding.etMessage.text?.clear()
+                    updateStatus("Connected")
+                }
+            } catch (e: BackendHttpException) {
+                runOnUiThread {
+                    binding.tvChatOutput.text = "${binding.tvChatOutput.text}\nError: ${e.message}"
+                    updateStatus(if (e.code == 401) "Authentication failed (HTTP 401)" else "Connected")
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     binding.tvChatOutput.text = "${binding.tvChatOutput.text}\nError: ${e.javaClass.simpleName}: ${e.message}"
                     updateStatus("Connected")
-                    binding.btnSend.isEnabled = true
                 }
+            } finally {
+                runOnUiThread { binding.btnSend.isEnabled = true }
             }
         }
     }
@@ -460,7 +456,7 @@ class MainActivity : AppCompatActivity() {
             val duration = pcm.size / (16000 * 2)
             updateStatus("Saved: ${file.name} ${file.length()} bytes, ~${duration}s")
             // Run the full voice pipeline off the UI thread:
-            // transcribe (Vosk) → Ollama chat → Piper synthesis → MediaPlayer playback.
+            // transcribe → assistant → Piper synthesis → MediaPlayer playback.
             isProcessing = true
             binding.btnVoice.isEnabled = false
             setState(UiState.Transcribing)
@@ -476,7 +472,7 @@ class MainActivity : AppCompatActivity() {
         return WavCodec.encodePcmToWav(pcm, sampleRate, channels, bits)
     }
 
-    // Full voice pipeline: transcribe → Ollama → Piper → playback.
+    // Full voice pipeline: transcribe → assistant (RAG/historial/web) → Piper → playback.
     // Runs entirely off the main UI thread on a single coroutine.
     private fun runVoicePipeline(wav: ByteArray) {
         lifecycleScope.launch(Dispatchers.IO) {
@@ -505,17 +501,17 @@ class MainActivity : AppCompatActivity() {
                     return@launch
                 }
 
-                // 2. Ollama chat.
+                // 2. Cerebro de ITGlasses (manuales, historial, web).
                 runOnUiThread { setState(UiState.Thinking) }
-                val answer = sendToOllama(transcript.text)
+                val reply = askAssistant(transcript.text)
                 runOnUiThread {
-                    binding.tvAiResponse.text = answer
+                    binding.tvAiResponse.text = AssistantProtocol.displayText(reply)
                     updateStatus("AI response received")
                 }
 
-                // 3. Piper synthesis.
+                // 3. Piper synthesis (el backend limpia el texto para voz).
                 runOnUiThread { setState(UiState.Synthesizing) }
-                val audioBytes = synthesizeSpeech(answer)
+                val audioBytes = synthesizeSpeech(reply.answer)
 
                 // 4. MediaPlayer playback.
                 playAudio(audioBytes)
@@ -567,35 +563,37 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** POST recognized text to the existing Ollama chat endpoint /api/v1/chat. */
-    private fun sendToOllama(message: String): String {
+    /**
+     * POST al asistente unificado /api/v1/assistant/chat y guarda el session_id
+     * que devuelve, para que la siguiente pregunta continúe la conversación.
+     */
+    private fun askAssistant(message: String): AssistantReply {
         val baseUrl = backendUrl ?: throw IllegalStateException("Backend URL is not configured.")
-        val json = org.json.JSONObject().put("message", message).toString()
-        val body = json.toRequestBody("application/json".toMediaType())
+        val body = AssistantProtocol.requestBody(message, assistantSessionId)
+            .toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
-            .url("$baseUrl$CHAT_ENDPOINT")
+            .url("$baseUrl$ASSISTANT_ENDPOINT")
             .post(body)
             .build()
         return okHttpClient.newCall(request).execute().use { response ->
             val responseBody = response.body?.string() ?: ""
             if (!response.isSuccessful) {
-                if (response.code == 401) {
-                    throw RuntimeException(authenticationMessage())
-                }
-                throw RuntimeException("Chat HTTP ${response.code} ${response.message ?: ""}")
+                if (response.code == 401) throw BackendHttpException(401, authenticationMessage())
+                throw BackendHttpException(response.code, "Assistant HTTP ${response.code} ${response.message}")
             }
-            org.json.JSONObject(responseBody).optString("answer", responseBody)
+            AssistantProtocol.parse(responseBody).also { reply ->
+                reply.sessionId?.let { assistantSessionId = it }
+            }
         }
     }
 
     /** POST text to the Piper synthesis endpoint /api/v1/voice/synthesize and return WAV bytes. */
     private fun synthesizeSpeech(text: String): ByteArray {
         val baseUrl = backendUrl ?: throw IllegalStateException("Backend URL is not configured.")
+        // Voz, hablante y velocidad los decide el backend (sus valores por defecto),
+        // así cambiar de voz en el servidor no rompe la app.
         val json = org.json.JSONObject()
-            .put("text", text)
-            .put("voice", "es_ES-sharvard-medium")
-            .put("speaker", 0)
-            .put("speed", 1.0)
+            .put("text", text.take(6000))
             .toString()
         val body = json.toRequestBody("application/json".toMediaType())
         val request = Request.Builder()

@@ -4,8 +4,8 @@
 
 - Phone package: `com.itglasses.itglassesandroid` (kept unchanged to preserve app data).
 - Meta package: `com.itglasses.itglassesandroid.meta` (can be installed alongside phone build).
-- Phone workflow: Android `AudioRecord` captures mono PCM16 at 16 kHz, the app sends WAV to the backend STT endpoint, sends recognized text to `/api/v1/chat`, requests Piper audio, then plays it with Android `MediaPlayer`.
-- The existing workflow has no chat session ID. It uses `/api/v1/chat`, not the RAG-aware `/api/v1/assistant/chat`.
+- Phone workflow: Android `AudioRecord` captures mono PCM16 at 16 kHz, the app sends WAV to the backend STT endpoint, sends recognized text to the unified assistant `/api/v1/assistant/chat` (manual RAG, conversation history, web search and spoken procedure narration), requests Piper audio, then plays it with Android `MediaPlayer`.
+- Text and voice share one assistant `session_id`, so follow-ups such as "¿y el siguiente paso?" keep context. The session resets on disconnect or re-pairing.
 - Phone input/output remain the only audio path. The DAT session below does not add camera, microphone, speech, or audio capabilities and does not change Android's audio route.
 - The `phone` flavor supports Android API 24+ and does not package or depend on Meta DAT. The `meta` flavor supports API 29+ and includes the DAT SDK.
 

@@ -6,7 +6,7 @@
     <string name="api_token_hint">API Bearer Token (required for LAN)</string>
     <string name="backend_health_endpoint">/api/v1/health</string>
     <string name="backend_status_endpoint">/api/v1/status</string>
-    <string name="backend_chat_endpoint">/api/v1/chat</string>
+    <string name="backend_chat_endpoint">/api/v1/assistant/chat</string>
     <string name="voice_input">Voice Input</string>
     <string name="voice_output">Voice Output</string>
     <string name="connect">Connect</string>
