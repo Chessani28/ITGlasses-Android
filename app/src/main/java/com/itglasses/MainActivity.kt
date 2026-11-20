@@ -93,6 +93,10 @@ class MainActivity : AppCompatActivity() {
 
     private var mediaPlayer: MediaPlayer? = null
 
+    // Micrófono de los lentes (Bluetooth); si no hay, el del teléfono.
+    private val glassesMic by lazy { GlassesMicrophone(applicationContext) }
+    private val audioPrefs by lazy { getSharedPreferences("itglasses_audio", MODE_PRIVATE) }
+
     private fun setState(state: UiState) {
         uiState = state
         runOnUiThread {
@@ -113,6 +117,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         isRecording = false // el hilo de grabación termina y libera el micrófono
+        glassesMic.release()
         if (::wearablesIntegration.isInitialized) wearablesIntegration.onDestroy()
         super.onDestroy()
         releaseMediaPlayer()
@@ -160,6 +165,10 @@ class MainActivity : AppCompatActivity() {
         binding.btnDisconnect.setOnClickListener { disconnectFromBackend() }
         binding.btnSend.setOnClickListener { sendMessage() }
         binding.btnVoice.setOnClickListener { toggleRecording() }
+        binding.cbGlassesMic.isChecked = audioPrefs.getBoolean(KEY_GLASSES_MIC, true)
+        binding.cbGlassesMic.setOnCheckedChangeListener { _, checked ->
+            audioPrefs.edit().putBoolean(KEY_GLASSES_MIC, checked).apply()
+        }
         wearablesIntegration = WearablesIntegrationFactory.create(this, binding)
         wearablesIntegration.onCreate(intent)
         binding.btnMetaRegister.setOnClickListener { wearablesIntegration.register() }
@@ -369,8 +378,13 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        // Lentes conectados por Bluetooth: se graba con su micrófono, con la
+        // fuente de voz para llamadas (cancelación de eco y ruido).
+        val glasses = binding.cbGlassesMic.isChecked && glassesMic.acquire()
+        val source = if (glasses) MediaRecorder.AudioSource.VOICE_COMMUNICATION
+            else MediaRecorder.AudioSource.MIC
         audioRecord = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
+            source,
             sampleRate,
             channelConfig,
             audioFormat,
@@ -380,17 +394,28 @@ class MainActivity : AppCompatActivity() {
             updateStatus("No se pudo iniciar el micrófono")
             audioRecord?.release()
             audioRecord = null
+            glassesMic.release()
             return
         }
+        audioRecord?.let { glassesMic.preferFor(it) }
+        val micLabel = glassesMic.currentLabel
 
         recordedPcm.reset()
         isRecording = true
         recordingStartMs = System.currentTimeMillis()
         binding.btnVoice.text = "Detener"
-        updateStatus("Grabando… 0 s")
-        audioRecord?.startRecording()
+        updateStatus(if (glasses) "Conectando $micLabel…" else "Grabando… 0 s · $micLabel")
 
         recordingThread = Thread {
+            // El enlace Bluetooth tarda un momento; sin esperar se pierde el
+            // inicio de la frase.
+            glassesMic.awaitReady()
+            if (!isRecording) {
+                runOnUiThread { finishRecording() }
+                return@Thread
+            }
+            audioRecord?.startRecording()
+            recordingStartMs = System.currentTimeMillis()
             val buffer = ShortArray(bufferSize / 2)
             var lastStatusMs = 0L
             while (isRecording) {
@@ -415,7 +440,7 @@ class MainActivity : AppCompatActivity() {
                 // Recording state and duration display, updated once per second.
                 if (now - lastStatusMs >= 1000) {
                     lastStatusMs = now
-                    runOnUiThread { updateStatus("Grabando… ${elapsed / 1000} s") }
+                    runOnUiThread { updateStatus("Grabando… ${elapsed / 1000} s · $micLabel") }
                 }
             }
             // El hilo ya no lee del micrófono: es seguro cerrarlo en el hilo de UI.
@@ -441,6 +466,8 @@ class MainActivity : AppCompatActivity() {
         audioRecord?.release()
         audioRecord = null
         recordingThread = null
+        // Se suelta la ruta de llamada para que la respuesta suene por audio multimedia.
+        glassesMic.release()
         if (isDestroyed) return
 
         binding.btnVoice.text = "Hablar"
@@ -668,6 +695,10 @@ class MainActivity : AppCompatActivity() {
     /** Agrega al chat de texto conservando solo los mensajes más recientes. */
     private fun appendChat(entry: String) {
         binding.tvChatOutput.text = ChatTranscript.append(binding.tvChatOutput.text.toString(), entry)
+    }
+
+    private companion object {
+        const val KEY_GLASSES_MIC = "glasses_mic"
     }
 
     private fun updateStatus(text: String) {

@@ -22,7 +22,7 @@
     <string name="transcription_empty">No se reconoció voz</string>
     <string name="transcription_error">Error al procesar la voz</string>
     <string name="ai_response_pending">Aquí aparecerá la respuesta</string>
-    <string name="phone_audio_mode">Modo teléfono: micrófono y bocina del teléfono</string>
+    <string name="phone_audio_mode">Audio: micrófono de los lentes si están conectados; si no, el del teléfono</string>
     <string name="meta_mode_title">Modo Meta Wearables (solo sesión del dispositivo)</string>
     <string name="meta_initializing">Iniciando Meta Wearables…</string>
     <string name="meta_register">Registrar en Meta AI</string>
@@ -30,4 +30,5 @@
     <string name="meta_stop_session">Detener sesión DAT</string>
     <string name="pair_device">EMPAREJAR DISPOSITIVO</string>
     <string name="voice_button">Hablar</string>
+    <string name="glasses_mic">Usar micrófono de los lentes (Bluetooth)</string>
 </resources>
