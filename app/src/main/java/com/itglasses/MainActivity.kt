@@ -13,6 +13,8 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.itglasses.itglassesandroid.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
@@ -114,6 +116,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        applySystemBarInsets()
 
         permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) {
@@ -164,6 +167,25 @@ class MainActivity : AppCompatActivity() {
         pairingControls()
         if (pairing.id.isNotEmpty()) runPairing()
         else if (!pairing.managed && (activeToken != null || !pairing.configured)) connectToBackend()
+    }
+
+    /**
+     * Con targetSdk 35+ la ventana se dibuja detrás de las barras del sistema
+     * (edge-to-edge) y desde API 36 ya no se puede desactivar. Se deja espacio
+     * para la barra de estado, la de navegación, el notch y el teclado, para
+     * que ningún botón quede tapado.
+     */
+    private fun applySystemBarInsets() {
+        binding.root.clipToPadding = false
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { view, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or
+                    WindowInsetsCompat.Type.displayCutout() or
+                    WindowInsetsCompat.Type.ime()
+            )
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            WindowInsetsCompat.CONSUMED
+        }
     }
 
     private fun pairingControls() {
