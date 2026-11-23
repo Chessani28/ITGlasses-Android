@@ -140,4 +140,5 @@
     <string name="background_action_off">Apagar</string>
     <string name="background_action_cancel">Cancelar</string>
     <string name="background_cancelled">Turno cancelado.</string>
+    <string name="media_probe_busy">Apaga primero «Escuchar con el celular bloqueado» para usar la prueba del botón.</string>
 </resources>

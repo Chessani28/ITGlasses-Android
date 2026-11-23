@@ -143,6 +143,8 @@ class MainActivity : AppCompatActivity() {
     // Background voice ("Escuchar con el celular bloqueado"): permissions, and the bubble of the turn on its way.
     private lateinit var backgroundPermissions: ActivityResultLauncher<Array<String>>
     private var backgroundMessage: Long? = null
+    /** After asking Android to start the service: if it is not running by then, the switch goes off with a notice. */
+    private val BACKGROUND_START_CHECK_MS = 3000L
 
     private fun setState(state: UiState) {
         uiState = state
@@ -166,10 +168,14 @@ class MainActivity : AppCompatActivity() {
     /** Leaving the app (or rotating) while listening cancels: nothing is sent. */
     override fun onStart() {
         super.onStart()
-        // The microphone service can only start while the app is visible: (re)start it here if its switch is on.
-        if (BackgroundVoice.enabled(this) && pairing.configured && pairing.managed && !BackgroundTurns.running.value &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            startBackgroundVoice()
+        if (BackgroundTurns.running.value) {
+            VoiceForegroundService.reclaim(this, "app_start")  // Take the temple tap back from video/music apps.
+        } else if (BackgroundVoice.enabled(this)) {
+            // Saved on but not running (reinstall, killed): the microphone service can only start while the app
+            // is visible, so restart it here; if it cannot run, show the switch off.
+            val canRun = pairing.configured && pairing.managed &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+            if (canRun) startBackgroundVoice() else showBackgroundOff()
         }
     }
 
@@ -188,6 +194,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startMediaProbe() {
+        if (BackgroundTurns.running.value) {
+            // Never two owners of the temple tap: the running service wins, the probe stays off.
+            MediaButtonProbe.set(this, false)
+            if (binding.swMediaProbe.isChecked) binding.swMediaProbe.isChecked = false
+            return
+        }
         if (mediaProbe == null) mediaProbe = MediaButtonProbe(this).also { it.start() }
     }
 
@@ -210,7 +222,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startBackgroundVoice() {
-        if (!VoiceForegroundService.start(this)) backgroundFailed()
+        // One owner of the temple tap: the diagnostic probe goes off when the service starts.
+        if (binding.swMediaProbe.isChecked) binding.swMediaProbe.isChecked = false
+        if (!VoiceForegroundService.start(this)) {
+            backgroundFailed()
+            return
+        }
+        lifecycleScope.launch {
+            delay(BACKGROUND_START_CHECK_MS)
+            if (BackgroundVoice.enabled(this@MainActivity) && !BackgroundTurns.running.value) backgroundFailed()
+        }
+    }
+
+    /** The switch shows the real state: off, without a notice. */
+    private fun showBackgroundOff() {
+        BackgroundVoice.set(this, false)
+        if (binding.swBackground.isChecked) binding.swBackground.isChecked = false
     }
 
     private fun disableBackgroundVoice() {
@@ -254,6 +281,12 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 launch { BackgroundTurns.startFailures.collect { backgroundFailed() } }
+                launch {
+                    // Turned off from the notification ("Apagar"): the switch follows.
+                    BackgroundTurns.running.collect { running ->
+                        if (!running && !BackgroundVoice.enabled(this@MainActivity)) showBackgroundOff()
+                    }
+                }
             }
         }
     }
@@ -309,8 +342,17 @@ class MainActivity : AppCompatActivity() {
         binding.swMediaProbe.visibility = if (BuildConfig.DEBUG) android.view.View.VISIBLE else android.view.View.GONE
         binding.swMediaProbe.isChecked = BuildConfig.DEBUG && MediaButtonProbe.enabled(this)
         binding.swMediaProbe.setOnCheckedChangeListener { _, on ->
+            if (on && BackgroundTurns.running.value) {
+                // The service owns the temple tap: the probe would take it away (seen in the log on 23/11).
+                binding.swMediaProbe.isChecked = false
+                voiceNotice(getString(R.string.media_probe_busy))
+                return@setOnCheckedChangeListener
+            }
             MediaButtonProbe.set(this, on)
-            if (on) startMediaProbe() else stopMediaProbe()
+            if (on) startMediaProbe() else {
+                stopMediaProbe()
+                VoiceForegroundService.reclaim(this, "probe_off")
+            }
         }
         if (BuildConfig.DEBUG && MediaButtonProbe.enabled(this)) startMediaProbe()
         backgroundPermissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->

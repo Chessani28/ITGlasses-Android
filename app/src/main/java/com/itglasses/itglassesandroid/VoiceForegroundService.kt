@@ -44,6 +44,7 @@ import kotlinx.coroutines.launch
 class VoiceForegroundService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val guard = ButtonGuard({ SystemClock.elapsedRealtime() })
+    private val main = Handler(Looper.getMainLooper())
     private var pipeline: VoicePipeline? = null
     private var glasses: GlassesAudio? = null
     private var session: MediaSession? = null
@@ -63,6 +64,7 @@ class VoiceForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_SHUTDOWN) {
+            BackgroundVoice.set(this, false)  // "Apagar" stays off: the app does not restart it on its next start.
             stopSelf()
             return START_NOT_STICKY
         }
@@ -72,6 +74,7 @@ class VoiceForegroundService : Service() {
         when (intent?.action) {
             ACTION_TALK -> pipeline?.tap(source)
             ACTION_CANCEL -> pipeline?.cancel(source)
+            ACTION_RECLAIM -> reclaimMediaButtons(source)
         }
         return START_NOT_STICKY  // Never restarted from the background: the microphone would be refused.
     }
@@ -81,6 +84,7 @@ class VoiceForegroundService : Service() {
         pipeline = null
         glasses?.release()
         glasses = null
+        main.removeCallbacksAndMessages(null)
         stopWatchingRoutes()
         session?.let {
             try {
@@ -121,7 +125,11 @@ class VoiceForegroundService : Service() {
         guard.block("service_start")
         val route = GlassesAudio(this)
         glasses = route
-        pipeline = VoicePipeline(this, pairing, route, onTurnEnd = { guard.block("turn_end") })
+        pipeline = VoicePipeline(this, pairing, route, onTurnEnd = {
+            guard.block("turn_end")
+            // Take the temple tap back once the glasses have switched from the call route to music.
+            main.postDelayed({ reclaimMediaButtons("turn_end") }, RECLAIM_AFTER_TURN_MS)
+        })
         watchRoutes()
         claimMediaButtons()
         BackgroundTurns.running.value = true
@@ -190,15 +198,37 @@ class VoiceForegroundService : Service() {
                 return true
             }
         })
-        created.setPlaybackState(PlaybackState.Builder()
-            .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or
-                PlaybackState.ACTION_SKIP_TO_NEXT)
-            .setState(PlaybackState.STATE_PLAYING, 0L, 1f)
-            .build())
+        created.setPlaybackState(playingState())
         created.isActive = true
         session = created
         GlassesLog.d("background media_session result=ok silence=${MediaClaim.playSilence()}")
     }
+
+    /**
+     * Re-assert the session (active, playing, half a second of silence as media) so Android hands the media
+     * buttons back to it after a video or music app, or the diagnostic probe, took them. Main thread.
+     */
+    private fun reclaimMediaButtons(reason: String) {
+        val current = session
+        if (current == null) {
+            claimMediaButtons()
+            return
+        }
+        try {
+            current.isActive = true
+            current.setPlaybackState(playingState())
+        } catch (e: RuntimeException) {
+            GlassesLog.d("background reclaim result=error type=${GlassesLog.safe(e.javaClass.simpleName)}")
+            return
+        }
+        GlassesLog.d("background reclaim reason=${GlassesLog.safe(reason)} silence=${MediaClaim.playSilence()}")
+    }
+
+    private fun playingState(): PlaybackState = PlaybackState.Builder()
+        .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or
+            PlaybackState.ACTION_SKIP_TO_NEXT)
+        .setState(PlaybackState.STATE_PLAYING, 0L, 1f)
+        .build()
 
     private fun update(stage: TurnStage) {
         try {
@@ -257,6 +287,9 @@ class VoiceForegroundService : Service() {
         const val ACTION_TALK = "com.itglasses.itglassesandroid.background.TALK"
         const val ACTION_CANCEL = "com.itglasses.itglassesandroid.background.CANCEL"
         const val ACTION_SHUTDOWN = "com.itglasses.itglassesandroid.background.SHUTDOWN"
+        const val ACTION_RECLAIM = "com.itglasses.itglassesandroid.background.RECLAIM"
+        /** After a turn, wait for the glasses to leave the call route before re-asserting the session. */
+        private const val RECLAIM_AFTER_TURN_MS = 1000L
         private const val EXTRA_SOURCE = "source"
         private const val CHANNEL = "itglasses_voice"
         private const val NOTIFICATION_ID = 4107
@@ -281,6 +314,17 @@ class VoiceForegroundService : Service() {
                     .putExtra(EXTRA_SOURCE, "app"))
             } catch (e: Exception) {
                 GlassesLog.d("background talk result=error type=${GlassesLog.safe(e.javaClass.simpleName)}")
+            }
+        }
+
+        /** Back to the app, or the probe turned off: take the temple tap back (only while the service runs). */
+        fun reclaim(context: Context, source: String) {
+            if (!BackgroundTurns.running.value) return
+            try {
+                context.startService(Intent(context, VoiceForegroundService::class.java).setAction(ACTION_RECLAIM)
+                    .putExtra(EXTRA_SOURCE, source))
+            } catch (e: Exception) {
+                GlassesLog.d("background reclaim request result=error type=${GlassesLog.safe(e.javaClass.simpleName)}")
             }
         }
 

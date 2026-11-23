@@ -107,7 +107,7 @@ class BackgroundVoiceTest {
             activity.contains("if (BackgroundTurns.running.value) {\r\n            VoiceForegroundService.talk(this)") ||
                 activity.contains("if (BackgroundTurns.running.value) {\n            VoiceForegroundService.talk(this)"))
         assertTrue("el servicio solo arranca con su interruptor",
-            activity.contains("if (BackgroundVoice.enabled(this) && pairing.configured && pairing.managed"))
+            activity.contains("} else if (BackgroundVoice.enabled(this)) {"))
         assertFalse("la app no reclama botones multimedia", activity.contains("MediaSession("))
         val strings = ModuleFiles.elements(ModuleFiles.xml("src/main/res/values/strings.xml"), "string")
             .associate { it.getAttribute("name") to it.textContent }
