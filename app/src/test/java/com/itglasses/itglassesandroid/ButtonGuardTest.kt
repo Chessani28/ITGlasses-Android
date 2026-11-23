@@ -52,13 +52,10 @@ class ButtonGuardTest {
     @Test fun backgroundRecordingLimits() {
         assertEquals(5_000L, BackgroundRecording.NO_SPEECH_TIMEOUT_MS)
         assertEquals(15_000L, BackgroundRecording.MAX_RECORDING_MS)
-        val quiet = EndOfSpeech().apply { repeat(200) { onBlock(0.05f, 50) } }
-        assertNull(BackgroundRecording.stop(4_999, 4_999, quiet))
-        assertEquals(RecordingStop.NO_SPEECH, BackgroundRecording.stop(5_000, 5_000, quiet))
-        assertNull("a late microphone: only real audio counts", BackgroundRecording.stop(6_000, 4_000, quiet))
-        val spoke = EndOfSpeech().apply { repeat(6) { onBlock(0.05f, 50) }; repeat(10) { onBlock(0.6f, 50) } }
-        assertNull("speech heard: keeps listening", BackgroundRecording.stop(10_000, 10_000, spoke))
-        assertEquals(RecordingStop.MAX_DURATION, BackgroundRecording.stop(15_000, 15_000, spoke))
+        assertNull(BackgroundRecording.stop(4_999, heard = false))
+        assertEquals(RecordingStop.NO_SPEECH, BackgroundRecording.stop(5_000, heard = false))
+        assertNull("speech heard: keeps listening", BackgroundRecording.stop(10_000, heard = true))
+        assertEquals(RecordingStop.MAX_DURATION, BackgroundRecording.stop(15_000, heard = true))
         assertTrue("never the 30 s of the app", BackgroundRecording.MAX_RECORDING_MS < VoiceTiming.MAX_MS)
     }
 

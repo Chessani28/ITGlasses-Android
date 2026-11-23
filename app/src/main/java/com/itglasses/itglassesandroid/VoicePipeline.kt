@@ -232,8 +232,9 @@ internal class VoicePipeline(
         val samples = ShortArray(bufferSize / 2)
         val bytes = ByteArray(samples.size * 2)
         val started = SystemClock.elapsedRealtime()
-        var audioMs = 0L  // Real audio, from the first block that is not digital silence.
-        var zeroMs = 0L   // Digital silence before that (the Bluetooth microphone not delivering yet).
+        // Diagnostics only (log): real audio after the first non-zero block, and digital silence before it.
+        var audioMs = 0L
+        var zeroMs = 0L
         var flowing = false
         var result = "stopped"
         try {
@@ -256,7 +257,7 @@ internal class VoicePipeline(
                     }
                 }
                 val elapsed = SystemClock.elapsedRealtime() - started
-                when (BackgroundRecording.stop(elapsed, audioMs, vad)) {
+                when (BackgroundRecording.stop(elapsed, vad.heard)) {
                     RecordingStop.NO_SPEECH -> {
                         GlassesLog.d(BackgroundRecording.describe("no_speech", elapsed, audioMs, zeroMs, vad))
                         return null

@@ -24,7 +24,7 @@ internal class EndOfSpeech(
     private var speechMs = 0L
     private var silentMs = 0L
 
-    /** Diagnostics and the background "was there any voice" check; they never change when the turn ends. */
+    /** Diagnostics only (the background log): they never change when the turn ends or is cancelled. */
     var peak = 0f
         private set
     /** Total time (not necessarily in a row) at or above [hintThreshold]. */
@@ -45,7 +45,7 @@ internal class EndOfSpeech(
     /** Background noise measured during calibration (0..1). */
     val noise: Float get() = if (noiseMs > 0) (noiseSum / noiseMs).toFloat() else 0f
 
-    /** Lower bar than [threshold]: "some voice was there", for cancelling a turn that never heard anyone. */
+    /** Diagnostics only: a lower "some voice" bar than [threshold], to tune the levels from the log. */
     val hintThreshold: Float get() = maxOf(HINT_LEVEL, minOf(noise, NOISE_CAP) + HINT_MARGIN)
 
     /** One block of [blockMs] at [level]. True when the speaker has finished (send the recording). */
@@ -86,7 +86,7 @@ internal class EndOfSpeech(
         /** Background measured at the start of each recording. */
         const val CALIBRATION_MS = 300L
 
-        /** "Some voice" level for the background no-speech check: 0.25 is about -37.5 dBFS. */
+        /** Diagnostics only: "some voice" level, 0.25 is about -37.5 dBFS. */
         const val HINT_LEVEL = 0.25f
         /** "Some voice" must be this far above the measured background. */
         const val HINT_MARGIN = 0.08f
