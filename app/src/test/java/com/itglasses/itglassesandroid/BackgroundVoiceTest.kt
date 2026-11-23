@@ -84,7 +84,7 @@ class BackgroundVoiceTest {
     @Test fun scoIsOnlyOpenDuringATurn() {
         assertFalse("el servicio nunca abre la ruta", service.contains("acquire()"))
         assertEquals("una sola apertura, dentro del turno", 1, Regex("""glasses\.acquire\(\)""").findAll(pipeline).count())
-        val turn = pipeline.substringAfter("private suspend fun runTurn()").substringBefore("private suspend fun fail(")
+        val turn = pipeline.substringAfter("private suspend fun runTurn(").substringBefore("private suspend fun fail(")
         assertTrue(turn.contains("glasses.acquire()"))
         assertTrue("siempre se libera al final del turno", turn.substringAfter("} finally {").contains("glasses.release()"))
     }

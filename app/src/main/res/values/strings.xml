@@ -138,4 +138,6 @@
     <string name="background_action_talk">Hablar</string>
     <string name="background_action_send">Detener y enviar</string>
     <string name="background_action_off">Apagar</string>
+    <string name="background_action_cancel">Cancelar</string>
+    <string name="background_cancelled">Turno cancelado.</string>
 </resources>

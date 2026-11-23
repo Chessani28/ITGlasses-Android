@@ -14,6 +14,8 @@ internal object VoiceCues {
         LISTENING(ToneGenerator.TONE_PROP_BEEP, 150),
         THINKING(ToneGenerator.TONE_PROP_ACK, 200),
         ERROR(ToneGenerator.TONE_PROP_NACK, 350),
+        /** Background turn cancelled (swipe on the temple or "Cancelar"): two short beeps. */
+        CANCELLED(ToneGenerator.TONE_PROP_BEEP2, 300),
     }
 
     /** Tone volume, 0..100. */

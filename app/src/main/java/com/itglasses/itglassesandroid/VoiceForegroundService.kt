@@ -7,10 +7,16 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
+import android.os.SystemClock
 import android.view.KeyEvent
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
@@ -27,14 +33,23 @@ import kotlinx.coroutines.launch
  * "Escuchar con el celular bloqueado": a microphone foreground service with a persistent notification. It must be
  * started while the app is visible (Android forbids starting a microphone foreground service from the background);
  * once running, a tap on the glasses' temple, the notification's "Hablar" or the app's "Hablar" runs a turn in
- * VoicePipeline. While it runs it claims the media buttons (one tap = Hablar / Detener y enviar); when it stops, the
- * taps control music again. If it cannot go to the foreground it stops and the app keeps its usual mode.
+ * VoicePipeline. While it runs it claims the media buttons (one tap = Hablar / Detener y enviar, swipe = Cancelar);
+ * when it stops, the taps control music again. If it cannot go to the foreground it stops and the app keeps its usual
+ * mode.
+ *
+ * ButtonGuard: the glasses send PLAY by themselves about 0.5 s after the call route closes (to resume music), and
+ * when they reconnect. Media buttons are ignored for ButtonGuard.WINDOW_MS after the service starts, after each turn,
+ * and after any Bluetooth device or communication route change. The notification's buttons are never blocked.
  */
 class VoiceForegroundService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val guard = ButtonGuard({ SystemClock.elapsedRealtime() })
     private var pipeline: VoicePipeline? = null
     private var glasses: GlassesAudio? = null
     private var session: MediaSession? = null
+    private var audio: AudioManager? = null
+    private var deviceCallback: AudioDeviceCallback? = null
+    private var routeListener: AudioManager.OnCommunicationDeviceChangedListener? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -53,7 +68,11 @@ class VoiceForegroundService : Service() {
         }
         if (!goForeground()) return START_NOT_STICKY
         if (pipeline == null && !prepare()) return START_NOT_STICKY
-        if (intent?.action == ACTION_TALK) pipeline?.tap()
+        val source = intent?.getStringExtra(EXTRA_SOURCE) ?: "intent"
+        when (intent?.action) {
+            ACTION_TALK -> pipeline?.tap(source)
+            ACTION_CANCEL -> pipeline?.cancel(source)
+        }
         return START_NOT_STICKY  // Never restarted from the background: the microphone would be refused.
     }
 
@@ -62,6 +81,7 @@ class VoiceForegroundService : Service() {
         pipeline = null
         glasses?.release()
         glasses = null
+        stopWatchingRoutes()
         session?.let {
             try {
                 it.isActive = false
@@ -98,9 +118,11 @@ class VoiceForegroundService : Service() {
             stopSelf()
             return false
         }
+        guard.block("service_start")
         val route = GlassesAudio(this)
         glasses = route
-        pipeline = VoicePipeline(this, pairing, route)
+        pipeline = VoicePipeline(this, pairing, route, onTurnEnd = { guard.block("turn_end") })
+        watchRoutes()
         claimMediaButtons()
         BackgroundTurns.running.value = true
         scope.launch { BackgroundTurns.stage.collect { stage -> update(stage) } }
@@ -108,7 +130,40 @@ class VoiceForegroundService : Service() {
         return true
     }
 
-    /** One tap on the temple = Hablar / Detener y enviar. NEXT and other keys are consumed and do nothing (for now). */
+    /** Bluetooth devices connecting or leaving, and communication route changes (ours included), arm the guard. */
+    private fun watchRoutes() {
+        val am = getSystemService(AudioManager::class.java) ?: return
+        audio = am
+        val callback = object : AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) {
+                if (added.any { it.type in BLUETOOTH_TYPES }) guard.block("bt_device_added")
+            }
+
+            override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) {
+                if (removed.any { it.type in BLUETOOTH_TYPES }) guard.block("bt_device_removed")
+            }
+        }
+        am.registerAudioDeviceCallback(callback, Handler(Looper.getMainLooper()))
+        deviceCallback = callback
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val listener = AudioManager.OnCommunicationDeviceChangedListener { guard.block("route_change") }
+            am.addOnCommunicationDeviceChangedListener(ContextCompat.getMainExecutor(this), listener)
+            routeListener = listener
+        }
+    }
+
+    private fun stopWatchingRoutes() {
+        val am = audio ?: return
+        deviceCallback?.let { try { am.unregisterAudioDeviceCallback(it) } catch (_: RuntimeException) { } }
+        deviceCallback = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            routeListener?.let { try { am.removeOnCommunicationDeviceChangedListener(it) } catch (_: RuntimeException) { } }
+        }
+        routeListener = null
+        audio = null
+    }
+
+    /** One tap on the temple = Hablar / Detener y enviar; swipe (NEXT) = Cancelar. Other keys do nothing. */
     private fun claimMediaButtons() {
         val created = try { MediaSession(this, SESSION_TAG) } catch (e: RuntimeException) {
             GlassesLog.d("background media_session result=error type=${GlassesLog.safe(e.javaClass.simpleName)}")
@@ -117,17 +172,27 @@ class VoiceForegroundService : Service() {
         created.setCallback(object : MediaSession.Callback() {
             override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
                 val event = keyEvent(mediaButtonIntent) ?: return false
-                val action = TalkButton.forKey(event.keyCode, event.action, event.repeatCount, BackgroundTurns.stage.value)
-                if (event.action == KeyEvent.ACTION_DOWN) {
-                    GlassesLog.d("background ${MediaButtons.describe(event.keyCode, event.action, event.repeatCount)} " +
-                        "result=${action.name}")
+                if (event.action != KeyEvent.ACTION_DOWN) return true
+                val key = MediaButtons.describe(event.keyCode, event.action, event.repeatCount)
+                val blocked = guard.blockedBy()
+                if (blocked != null) {
+                    GlassesLog.d("background $key result=IGNORED guard=$blocked")
+                    return true
                 }
-                if (action != TalkAction.IGNORE) pipeline?.tap()
+                val action = TalkButton.forKey(event.keyCode, event.action, event.repeatCount, BackgroundTurns.stage.value)
+                GlassesLog.d("background $key result=${action.name}")
+                val source = "key:${event.keyCode}"
+                when (action) {
+                    TalkAction.START, TalkAction.STOP_AND_SEND -> pipeline?.tap(source)
+                    TalkAction.CANCEL -> pipeline?.cancel(source)
+                    TalkAction.IGNORE -> Unit
+                }
                 return true
             }
         })
         created.setPlaybackState(PlaybackState.Builder()
-            .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE)
+            .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or
+                PlaybackState.ACTION_SKIP_TO_NEXT)
             .setState(PlaybackState.STATE_PLAYING, 0L, 1f)
             .build())
         created.isActive = true
@@ -150,7 +215,6 @@ class VoiceForegroundService : Service() {
             TurnStage.THINKING -> R.string.background_thinking
             TurnStage.SPEAKING -> R.string.background_speaking
         }
-        val talkLabel = if (stage == TurnStage.LISTENING) R.string.background_action_send else R.string.background_action_talk
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val builder = NotificationCompat.Builder(this, CHANNEL)
@@ -164,17 +228,24 @@ class VoiceForegroundService : Service() {
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-        if (stage == TurnStage.READY || stage == TurnStage.LISTENING) {
-            builder.addAction(NotificationCompat.Action.Builder(0, getString(talkLabel), command(ACTION_TALK, 1))
-                .setAuthenticationRequired(false).build())
+        when (stage) {
+            TurnStage.READY -> builder.addAction(action(R.string.background_action_talk, ACTION_TALK, 1))
+            TurnStage.LISTENING -> {
+                builder.addAction(action(R.string.background_action_send, ACTION_TALK, 1))
+                builder.addAction(action(R.string.background_action_cancel, ACTION_CANCEL, 3))
+            }
+            TurnStage.THINKING, TurnStage.SPEAKING -> builder.addAction(action(R.string.background_action_cancel, ACTION_CANCEL, 3))
         }
-        builder.addAction(NotificationCompat.Action.Builder(0, getString(R.string.background_action_off), command(ACTION_SHUTDOWN, 2))
-            .setAuthenticationRequired(false).build())
+        builder.addAction(action(R.string.background_action_off, ACTION_SHUTDOWN, 2))
         return builder.build()
     }
 
+    private fun action(label: Int, intentAction: String, request: Int) =
+        NotificationCompat.Action.Builder(0, getString(label), command(intentAction, request))
+            .setAuthenticationRequired(false).build()
+
     private fun command(action: String, request: Int): PendingIntent = PendingIntent.getService(this, request,
-        Intent(this, VoiceForegroundService::class.java).setAction(action),
+        Intent(this, VoiceForegroundService::class.java).setAction(action).putExtra(EXTRA_SOURCE, "notification"),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
     private fun keyEvent(intent: Intent): KeyEvent? =
@@ -184,10 +255,14 @@ class VoiceForegroundService : Service() {
     companion object {
         const val ACTION_START = "com.itglasses.itglassesandroid.background.START"
         const val ACTION_TALK = "com.itglasses.itglassesandroid.background.TALK"
+        const val ACTION_CANCEL = "com.itglasses.itglassesandroid.background.CANCEL"
         const val ACTION_SHUTDOWN = "com.itglasses.itglassesandroid.background.SHUTDOWN"
+        private const val EXTRA_SOURCE = "source"
         private const val CHANNEL = "itglasses_voice"
         private const val NOTIFICATION_ID = 4107
         private const val SESSION_TAG = "ITGlassesVoice"
+        /** Classic Bluetooth (SCO, A2DP) and LE Audio headsets (TYPE_BLE_HEADSET = 26). */
+        private val BLUETOOTH_TYPES = setOf(AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, 26)
 
         /** Only while the app is visible. False when Android refuses it (the app keeps its usual mode). */
         fun start(context: Context): Boolean = try {
@@ -202,7 +277,8 @@ class VoiceForegroundService : Service() {
         fun talk(context: Context) {
             if (!BackgroundTurns.running.value) return
             try {
-                context.startService(Intent(context, VoiceForegroundService::class.java).setAction(ACTION_TALK))
+                context.startService(Intent(context, VoiceForegroundService::class.java).setAction(ACTION_TALK)
+                    .putExtra(EXTRA_SOURCE, "app"))
             } catch (e: Exception) {
                 GlassesLog.d("background talk result=error type=${GlassesLog.safe(e.javaClass.simpleName)}")
             }

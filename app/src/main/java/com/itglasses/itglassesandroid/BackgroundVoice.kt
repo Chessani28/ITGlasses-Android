@@ -22,12 +22,13 @@ internal object BackgroundVoice {
 /** Stage of a background voice turn. */
 internal enum class TurnStage { READY, LISTENING, THINKING, SPEAKING }
 
-internal enum class TalkAction { START, STOP_AND_SEND, IGNORE }
+internal enum class TalkAction { START, STOP_AND_SEND, CANCEL, IGNORE }
 
 /**
  * Pure: what a tap does. One tap on the glasses' temple (PLAY, PAUSE or PLAY_PAUSE; HEADSETHOOK too, since with the
  * call route open the same tap can arrive as the headset button), the notification's button or the app's "Hablar":
- * READY starts listening, LISTENING stops and sends, anything else is ignored. NEXT and long presses do nothing.
+ * READY starts listening, LISTENING stops and sends, anything else is ignored. A swipe (NEXT) cancels the turn on its
+ * way (listening, thinking or speaking) and does nothing outside a turn. Long presses never reach the app.
  */
 internal object TalkButton {
     val TALK_KEYS = setOf(
@@ -36,6 +37,7 @@ internal object TalkButton {
         KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
         KeyEvent.KEYCODE_HEADSETHOOK,
     )
+    const val CANCEL_KEY = KeyEvent.KEYCODE_MEDIA_NEXT
 
     fun forTap(stage: TurnStage): TalkAction = when (stage) {
         TurnStage.READY -> TalkAction.START
@@ -43,9 +45,62 @@ internal object TalkButton {
         TurnStage.THINKING, TurnStage.SPEAKING -> TalkAction.IGNORE
     }
 
+    fun forCancel(stage: TurnStage): TalkAction = if (stage == TurnStage.READY) TalkAction.IGNORE else TalkAction.CANCEL
+
     /** Only the key-down of a first press counts (the key-up and auto-repeats of the same tap are ignored). */
-    fun forKey(keyCode: Int, action: Int, repeat: Int, stage: TurnStage): TalkAction =
-        if (action != KeyEvent.ACTION_DOWN || repeat > 0 || keyCode !in TALK_KEYS) TalkAction.IGNORE else forTap(stage)
+    fun forKey(keyCode: Int, action: Int, repeat: Int, stage: TurnStage): TalkAction = when {
+        action != KeyEvent.ACTION_DOWN || repeat > 0 -> TalkAction.IGNORE
+        keyCode == CANCEL_KEY -> forCancel(stage)
+        keyCode in TALK_KEYS -> forTap(stage)
+        else -> TalkAction.IGNORE
+    }
+}
+
+/**
+ * Pure: media buttons are ignored for [windowMs] after events that make the glasses send keys on their own (they send
+ * PLAY about 0.5 s after the call route closes, to resume music): the end of a turn, a Bluetooth route or device
+ * change, and the start of the service. Thread-safe; [now] is a monotonic clock in milliseconds.
+ */
+internal class ButtonGuard(private val now: () -> Long, private val windowMs: Long = WINDOW_MS) {
+    private var until = 0L
+    private var cause = "none"
+
+    @Synchronized
+    fun block(reason: String) {
+        val end = now() + windowMs
+        if (end >= until) {
+            until = end
+            cause = reason
+        }
+    }
+
+    /** The reason of the active block, or null when keys are accepted. */
+    @Synchronized
+    fun blockedBy(): String? = if (now() < until) cause else null
+
+    companion object {
+        /** Keys ignored this long after a turn ends, the route changes or the service starts. */
+        const val WINDOW_MS = 3000L
+    }
+}
+
+internal enum class RecordingStop { NO_SPEECH, MAX_DURATION }
+
+/**
+ * Pure: when a background recording stops on its own (besides the end of speech and the user's taps). Shorter than the
+ * app's 30 s on purpose: the service never records a whole conversation.
+ */
+internal object BackgroundRecording {
+    /** No speech heard this long after listening starts: cancel in silence, nothing is sent. */
+    const val NO_SPEECH_TIMEOUT_MS = 5_000L
+    /** Hard limit of a background recording. */
+    const val MAX_RECORDING_MS = 15_000L
+
+    fun stop(elapsedMs: Long, heard: Boolean): RecordingStop? = when {
+        !heard && elapsedMs >= NO_SPEECH_TIMEOUT_MS -> RecordingStop.NO_SPEECH
+        elapsedMs >= MAX_RECORDING_MS -> RecordingStop.MAX_DURATION
+        else -> null
+    }
 }
 
 /** What the open app shows of a background turn (bubbles). */
