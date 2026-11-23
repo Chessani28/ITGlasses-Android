@@ -122,4 +122,5 @@
     <!-- Demo lentes -->
     <string name="glasses_switch">Usar lentes (Bluetooth)</string>
     <string name="glasses_unavailable">No se pudieron usar los lentes por Bluetooth; se usarán el micrófono y el altavoz del celular.</string>
+    <string name="media_probe_switch">Prueba: botón de los lentes (diagnóstico)</string>
 </resources>

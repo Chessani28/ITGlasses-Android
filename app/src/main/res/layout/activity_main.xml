@@ -127,6 +127,16 @@
             android:text="@string/glasses_switch"
             android:layout_marginTop="8dp"/>
 
+        <!-- Prueba de la patilla (fase A): only logs media buttons. Debug builds only; off by default. -->
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/sw_media_probe"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:text="@string/media_probe_switch"
+            android:visibility="gone"
+            android:layout_marginTop="8dp"/>
+
         <Button
             android:id="@+id/btn_connect"
             android:layout_width="match_parent"

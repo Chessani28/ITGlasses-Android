@@ -137,6 +137,8 @@ class MainActivity : AppCompatActivity() {
     /** Increases with each voice turn: a late release never touches a newer turn's route. */
     private var voiceTurn = 0
     private val CUE_GAP_MS = 80L
+    /** Prueba de la patilla (fase A, solo debug): exists only while its switch is on. */
+    private var mediaProbe: MediaButtonProbe? = null
 
     private fun setState(state: UiState) {
         uiState = state
@@ -168,6 +170,17 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         releaseMediaPlayer()
         glassesAudio.release()
+        mediaProbe?.release()
+        mediaProbe = null
+    }
+
+    private fun startMediaProbe() {
+        if (mediaProbe == null) mediaProbe = MediaButtonProbe(this).also { it.start() }
+    }
+
+    private fun stopMediaProbe() {
+        mediaProbe?.release()
+        mediaProbe = null
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -218,6 +231,13 @@ class MainActivity : AppCompatActivity() {
         binding.btnVoice.setOnClickListener { toggleRecording() }
         binding.swGlasses.isChecked = GlassesSettings.enabled(this)
         binding.swGlasses.setOnCheckedChangeListener { _, on -> GlassesSettings.set(this, on) }
+        binding.swMediaProbe.visibility = if (BuildConfig.DEBUG) android.view.View.VISIBLE else android.view.View.GONE
+        binding.swMediaProbe.isChecked = BuildConfig.DEBUG && MediaButtonProbe.enabled(this)
+        binding.swMediaProbe.setOnCheckedChangeListener { _, on ->
+            MediaButtonProbe.set(this, on)
+            if (on) startMediaProbe() else stopMediaProbe()
+        }
+        if (BuildConfig.DEBUG && MediaButtonProbe.enabled(this)) startMediaProbe()
         wearablesIntegration = WearablesIntegrationFactory.create(this, binding)
         wearablesIntegration.onCreate(intent)
         binding.btnMetaRegister.setOnClickListener { wearablesIntegration.register() }
