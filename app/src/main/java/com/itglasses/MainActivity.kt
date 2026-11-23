@@ -40,7 +40,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var permissionLauncher: ActivityResultLauncher<String>
     private lateinit var wearablesIntegration: WearablesIntegration
 
-    private val pairing by lazy { DevicePairing(applicationContext, BuildConfig.PAIRING_ORIGIN) }
+    // One DevicePairing per process, shared with VoiceForegroundService (PairingAccess); DevicePairing is unchanged.
+    private val pairing by lazy { PairingAccess.get(applicationContext, BuildConfig.PAIRING_ORIGIN) }
     private val pairingController by lazy {
         PairingController(
             DevicePairingGateway(pairing, { DeviceInfo.name(applicationContext) }, DeviceInfo::model),
@@ -139,6 +140,9 @@ class MainActivity : AppCompatActivity() {
     private val CUE_GAP_MS = 80L
     /** Prueba de la patilla (fase A, solo debug): exists only while its switch is on. */
     private var mediaProbe: MediaButtonProbe? = null
+    // Background voice ("Escuchar con el celular bloqueado"): permissions, and the bubble of the turn on its way.
+    private lateinit var backgroundPermissions: ActivityResultLauncher<Array<String>>
+    private var backgroundMessage: Long? = null
 
     private fun setState(state: UiState) {
         uiState = state
@@ -160,6 +164,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Leaving the app (or rotating) while listening cancels: nothing is sent. */
+    override fun onStart() {
+        super.onStart()
+        // The microphone service can only start while the app is visible: (re)start it here if its switch is on.
+        if (BackgroundVoice.enabled(this) && pairing.configured && pairing.managed && !BackgroundTurns.running.value &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            startBackgroundVoice()
+        }
+    }
+
     override fun onStop() {
         if (voiceFlow.screenOpen) cancelRecording()
         super.onStop()
@@ -181,6 +194,68 @@ class MainActivity : AppCompatActivity() {
     private fun stopMediaProbe() {
         mediaProbe?.release()
         mediaProbe = null
+    }
+
+    /** Switch on: needs this phone paired, the microphone (and on Android 13+ ask for notifications). */
+    private fun enableBackgroundVoice() {
+        if (!pairing.configured || !pairing.managed) {
+            backgroundFailed(getString(R.string.background_needs_pairing))
+            return
+        }
+        BackgroundVoice.set(this, true)
+        val needed = mutableListOf(Manifest.permission.RECORD_AUDIO)
+        if (android.os.Build.VERSION.SDK_INT >= 33) needed += Manifest.permission.POST_NOTIFICATIONS
+        val missing = needed.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+        if (missing.isEmpty()) startBackgroundVoice() else backgroundPermissions.launch(missing.toTypedArray())
+    }
+
+    private fun startBackgroundVoice() {
+        if (!VoiceForegroundService.start(this)) backgroundFailed()
+    }
+
+    private fun disableBackgroundVoice() {
+        BackgroundVoice.set(this, false)
+        VoiceForegroundService.shutdown(this)
+    }
+
+    /** The service could not run: switch off, a notice, and the usual mode (app open) goes on as before. */
+    private fun backgroundFailed(text: String = getString(R.string.background_start_failed)) {
+        BackgroundVoice.set(this, false)
+        if (binding.swBackground.isChecked) binding.swBackground.isChecked = false
+        voiceNotice(text)
+    }
+
+    /** Pairing mode: the background turns as bubbles while the app is open (nothing is replayed afterwards). */
+    private fun observeBackgroundTurns() {
+        if (!pairing.configured) return
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch {
+                    BackgroundTurns.updates.collect { update ->
+                        when (update) {
+                            is TurnUpdate.Asked -> {
+                                val (id, change) = chatLog.send(update.text)
+                                backgroundMessage = id
+                                showChange(change)
+                            }
+                            is TurnUpdate.Answered -> {
+                                val id = backgroundMessage
+                                if (id != null) chatBubbles.apply(chatLog.answered(id, update.text))
+                                else showChange(chatLog.notice(update.text))
+                                backgroundMessage = null
+                            }
+                            is TurnUpdate.Failed -> {
+                                val id = backgroundMessage
+                                if (id != null) chatBubbles.apply(chatLog.failed(id, update.notice))
+                                else showChange(chatLog.notice(update.notice))
+                                backgroundMessage = null
+                            }
+                        }
+                    }
+                }
+                launch { BackgroundTurns.startFailures.collect { backgroundFailed() } }
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -238,6 +313,14 @@ class MainActivity : AppCompatActivity() {
             if (on) startMediaProbe() else stopMediaProbe()
         }
         if (BuildConfig.DEBUG && MediaButtonProbe.enabled(this)) startMediaProbe()
+        backgroundPermissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            val mic = result[Manifest.permission.RECORD_AUDIO] ?: (ContextCompat.checkSelfPermission(this,
+                Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
+            if (mic) startBackgroundVoice() else backgroundFailed(getString(R.string.voice_mic_denied))
+        }
+        binding.swBackground.isChecked = BackgroundVoice.enabled(this)
+        binding.swBackground.setOnCheckedChangeListener { _, on -> if (on) enableBackgroundVoice() else disableBackgroundVoice() }
+        observeBackgroundTurns()
         wearablesIntegration = WearablesIntegrationFactory.create(this, binding)
         wearablesIntegration.onCreate(intent)
         binding.btnMetaRegister.setOnClickListener { wearablesIntegration.register() }
@@ -528,6 +611,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toggleRecording() {
+        // Background voice running: it owns the microphone, so "Hablar" runs (or ends) its turn.
+        if (BackgroundTurns.running.value) {
+            VoiceForegroundService.talk(this)
+            return
+        }
         // Ignore taps while a recording is being uploaded or transcribed.
         if (isProcessing) return
         if (isRecording) {
