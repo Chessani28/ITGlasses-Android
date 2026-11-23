@@ -91,16 +91,38 @@ internal enum class RecordingStop { NO_SPEECH, MAX_DURATION }
  * app's 30 s on purpose: the service never records a whole conversation.
  */
 internal object BackgroundRecording {
-    /** No speech heard this long after listening starts: cancel in silence, nothing is sent. */
+    /**
+     * No voice at all in this much real audio (counted from the first block that is not digital silence, so a
+     * Bluetooth microphone that starts late does not eat into it): cancel in silence, nothing is sent.
+     */
     const val NO_SPEECH_TIMEOUT_MS = 5_000L
+    /** Any voice for this long (in total) keeps the turn: it is then ended by the end of speech or the limit. */
+    const val VOICE_SEEN_MS = 150L
     /** Hard limit of a background recording. */
     const val MAX_RECORDING_MS = 15_000L
 
-    fun stop(elapsedMs: Long, heard: Boolean): RecordingStop? = when {
-        !heard && elapsedMs >= NO_SPEECH_TIMEOUT_MS -> RecordingStop.NO_SPEECH
-        elapsedMs >= MAX_RECORDING_MS -> RecordingStop.MAX_DURATION
+    /** [wallMs] since recording started, [audioMs] of real (non-zero) audio, [vad] of this recording. */
+    fun stop(wallMs: Long, audioMs: Long, vad: EndOfSpeech): RecordingStop? = when {
+        !voiceSeen(vad) && audioMs >= NO_SPEECH_TIMEOUT_MS -> RecordingStop.NO_SPEECH
+        wallMs >= MAX_RECORDING_MS -> RecordingStop.MAX_DURATION
         else -> null
     }
+
+    fun voiceSeen(vad: EndOfSpeech): Boolean = vad.heard || vad.voiceMs >= VOICE_SEEN_MS
+
+    /** Every sample is 0: the microphone is not delivering audio yet (common right after a SCO link opens). */
+    fun digitalSilence(samples: ShortArray, count: Int): Boolean {
+        for (i in 0 until count.coerceIn(0, samples.size)) if (samples[i].toInt() != 0) return false
+        return true
+    }
+
+    /** One diagnostic line: levels 0..1 with two decimals, times in ms. Never audio or text. */
+    fun describe(result: String, wallMs: Long, audioMs: Long, zeroMs: Long, vad: EndOfSpeech): String =
+        "background record result=$result wall_ms=$wallMs audio_ms=$audioMs zero_ms=$zeroMs " +
+            "peak=${two(vad.peak)} noise=${two(vad.noise)} threshold=${two(vad.threshold)} " +
+            "hint=${two(vad.hintThreshold)} voice_ms=${vad.voiceMs} heard=${vad.heard}"
+
+    private fun two(value: Float) = "%.2f".format(java.util.Locale.ROOT, value)
 }
 
 /** What the open app shows of a background turn (bubbles). */

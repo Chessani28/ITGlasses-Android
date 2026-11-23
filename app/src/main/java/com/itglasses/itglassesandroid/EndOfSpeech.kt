@@ -24,6 +24,13 @@ internal class EndOfSpeech(
     private var speechMs = 0L
     private var silentMs = 0L
 
+    /** Diagnostics and the background "was there any voice" check; they never change when the turn ends. */
+    var peak = 0f
+        private set
+    /** Total time (not necessarily in a row) at or above [hintThreshold]. */
+    var voiceMs = 0L
+        private set
+
     /** Speech was heard: from now on a long enough silence ends the turn. */
     var heard = false
         private set
@@ -35,15 +42,23 @@ internal class EndOfSpeech(
             return maxOf(speechLevel, minOf(noise, NOISE_CAP) + margin)
         }
 
+    /** Background noise measured during calibration (0..1). */
+    val noise: Float get() = if (noiseMs > 0) (noiseSum / noiseMs).toFloat() else 0f
+
+    /** Lower bar than [threshold]: "some voice was there", for cancelling a turn that never heard anyone. */
+    val hintThreshold: Float get() = maxOf(HINT_LEVEL, minOf(noise, NOISE_CAP) + HINT_MARGIN)
+
     /** One block of [blockMs] at [level]. True when the speaker has finished (send the recording). */
     fun onBlock(level: Float, blockMs: Long): Boolean {
         if (blockMs <= 0) return false
+        if (level > peak) peak = level
         elapsedMs += blockMs
         if (elapsedMs <= calibrationMs) {
             noiseSum += level.toDouble() * blockMs
             noiseMs += blockMs
             return false
         }
+        if (level >= hintThreshold) voiceMs += blockMs
         if (level >= threshold) {
             speechMs += blockMs
             silentMs = 0
@@ -70,6 +85,11 @@ internal class EndOfSpeech(
         const val MIN_SPEECH_MS = 200L
         /** Background measured at the start of each recording. */
         const val CALIBRATION_MS = 300L
+
+        /** "Some voice" level for the background no-speech check: 0.25 is about -37.5 dBFS. */
+        const val HINT_LEVEL = 0.25f
+        /** "Some voice" must be this far above the measured background. */
+        const val HINT_MARGIN = 0.08f
 
         /** Duration of [samples] PCM samples at [sampleRate]. */
         fun blockMs(samples: Int, sampleRate: Int = 16_000): Long =

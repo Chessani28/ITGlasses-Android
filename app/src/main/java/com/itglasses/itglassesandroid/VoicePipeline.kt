@@ -232,6 +232,10 @@ internal class VoicePipeline(
         val samples = ShortArray(bufferSize / 2)
         val bytes = ByteArray(samples.size * 2)
         val started = SystemClock.elapsedRealtime()
+        var audioMs = 0L  // Real audio, from the first block that is not digital silence.
+        var zeroMs = 0L   // Digital silence before that (the Bluetooth microphone not delivering yet).
+        var flowing = false
+        var result = "stopped"
         try {
             while (!stopRequested) {
                 val read = active.read(samples, 0, samples.size)
@@ -242,24 +246,29 @@ internal class VoicePipeline(
                         bytes[2 * i + 1] = (samples[i].toInt() shr 8 and 0xFF).toByte()
                     }
                     out.write(bytes, 0, read * 2)
-                    if (vad.onBlock(VoiceLevel.of(samples, read), EndOfSpeech.blockMs(read))) {
+                    val blockMs = EndOfSpeech.blockMs(read)
+                    if (!flowing && BackgroundRecording.digitalSilence(samples, read)) zeroMs += blockMs else flowing = true
+                    if (flowing) audioMs += blockMs
+                    if (vad.onBlock(VoiceLevel.of(samples, read), blockMs)) {
                         GlassesLog.d("background vad end ms=${SystemClock.elapsedRealtime() - started}")
+                        result = "vad_end"
                         break
                     }
                 }
                 val elapsed = SystemClock.elapsedRealtime() - started
-                when (BackgroundRecording.stop(elapsed, vad.heard)) {
+                when (BackgroundRecording.stop(elapsed, audioMs, vad)) {
                     RecordingStop.NO_SPEECH -> {
-                        GlassesLog.d("background record result=no_speech ms=$elapsed")
+                        GlassesLog.d(BackgroundRecording.describe("no_speech", elapsed, audioMs, zeroMs, vad))
                         return null
                     }
                     RecordingStop.MAX_DURATION -> {
-                        GlassesLog.d("background record result=max_duration ms=$elapsed")
+                        result = "max_duration"
                         break
                     }
                     null -> Unit
                 }
             }
+            GlassesLog.d(BackgroundRecording.describe(result, SystemClock.elapsedRealtime() - started, audioMs, zeroMs, vad))
         } finally {
             try { active.stop() } catch (_: IllegalStateException) { }
             active.release()
