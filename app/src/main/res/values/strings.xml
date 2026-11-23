@@ -119,4 +119,7 @@
     <string name="voice_screen_stop">Detener y enviar</string>
     <string name="voice_screen_cancel">Cancelar</string>
     <string name="voice_screen_hint">Toca Detener y enviar cuando termines.</string>
+    <!-- Demo lentes -->
+    <string name="glasses_switch">Usar lentes (Bluetooth)</string>
+    <string name="glasses_unavailable">No se pudieron usar los lentes por Bluetooth; se usarán el micrófono y el altavoz del celular.</string>
 </resources>

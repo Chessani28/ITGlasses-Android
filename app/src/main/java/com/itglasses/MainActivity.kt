@@ -77,6 +77,7 @@ class MainActivity : AppCompatActivity() {
     private val okHttpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
+            .addInterceptor(BusyRetryInterceptor())  // Demo lentes (two phones): see BusyRetry.
             .addInterceptor { chain ->
                 if (pairing.configured) {
                     // OkHttp thread: only queues work for the controller (403 -> status check, 410 -> register again).
@@ -129,8 +130,17 @@ class MainActivity : AppCompatActivity() {
 
     private var mediaPlayer: MediaPlayer? = null
 
+    // Demo lentes ("Usar lentes"): Bluetooth route, end of speech and tones. Unused with the switch off.
+    private val glassesAudio by lazy { GlassesAudio(this) }
+    @Volatile private var endOfSpeech: EndOfSpeech? = null
+    private var glassesStarting = false
+    /** Increases with each voice turn: a late release never touches a newer turn's route. */
+    private var voiceTurn = 0
+    private val CUE_GAP_MS = 80L
+
     private fun setState(state: UiState) {
         uiState = state
+        if (state == UiState.Ready || state == UiState.Error) runOnUiThread { voiceTurnEnded(error = state == UiState.Error) }
         runOnUiThread {
             updateInputs()
             if (pairing.configured) return@runOnUiThread  // Pairing mode: voice states live in the bubbles.
@@ -157,6 +167,7 @@ class MainActivity : AppCompatActivity() {
         if (::wearablesIntegration.isInitialized) wearablesIntegration.onDestroy()
         super.onDestroy()
         releaseMediaPlayer()
+        glassesAudio.release()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -169,7 +180,7 @@ class MainActivity : AppCompatActivity() {
 
         permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) {
-                startRecording()
+                beginVoice()
             } else {
                 voiceStartFailed(getString(R.string.voice_mic_denied))
             }
@@ -205,6 +216,8 @@ class MainActivity : AppCompatActivity() {
         binding.btnDisconnect.setOnClickListener { disconnectFromBackend() }
         binding.btnSend.setOnClickListener { sendMessage() }
         binding.btnVoice.setOnClickListener { toggleRecording() }
+        binding.swGlasses.isChecked = GlassesSettings.enabled(this)
+        binding.swGlasses.setOnCheckedChangeListener { _, on -> GlassesSettings.set(this, on) }
         wearablesIntegration = WearablesIntegrationFactory.create(this, binding)
         wearablesIntegration.onCreate(intent)
         binding.btnMetaRegister.setOnClickListener { wearablesIntegration.register() }
@@ -503,7 +516,7 @@ class MainActivity : AppCompatActivity() {
             this,
             Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED) {
-            startRecording()
+            beginVoice()
         } else {
             permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
@@ -544,6 +557,7 @@ class MainActivity : AppCompatActivity() {
                 record?.release()
                 continue
             }
+            glassesAudio.input?.let { record.setPreferredDevice(it) }  // Demo lentes: the glasses' microphone.
             val recording = try {
                 record.startRecording()
                 record.recordingState == AudioRecord.RECORDSTATE_RECORDING
@@ -562,6 +576,7 @@ class MainActivity : AppCompatActivity() {
             voiceStartFailed(getString(R.string.voice_mic_unavailable))
             return
         }
+        endOfSpeech = if (GlassesSettings.enabled(this)) EndOfSpeech() else null
         isRecording = true
         recordingStartMs = System.currentTimeMillis()
         if (pairing.configured) {
@@ -579,8 +594,11 @@ class MainActivity : AppCompatActivity() {
             var lastStatusMs = 0L
             while (isRecording) {
                 val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
+                var ended = false
                 if (read > 0) {
                     voiceMeter.onSamples(buffer, read)  // Level for the voice screen; no allocation.
+                    // Demo lentes: automatic end of speech, only with "Usar lentes" on (null otherwise).
+                    ended = endOfSpeech?.onBlock(voiceMeter.level, EndOfSpeech.blockMs(read)) == true
                     val bb = ByteBuffer.allocate(read * 2).order(ByteOrder.LITTLE_ENDIAN)
                     for (i in 0 until read) bb.putShort(buffer[i])
                     synchronized(recordedPcm) {
@@ -591,8 +609,9 @@ class MainActivity : AppCompatActivity() {
                 val now = System.currentTimeMillis()
                 val elapsed = now - recordingStartMs
 
-                // Maximum recording duration of 30 seconds: stop and send, exactly like "Detener y enviar".
-                if (VoiceTiming.reachedMax(elapsed)) {
+                // Maximum recording duration of 30 seconds, or (Demo lentes) the end of speech: stop and send,
+                // exactly like "Detener y enviar" (which keeps working while the VAD listens).
+                if (VoiceTiming.reachedMax(elapsed) || ended) {
                     isRecording = false
                     runOnUiThread {
                         // After a cancel STOP is refused and finishRecording finds no AudioRecord: nothing is sent.
@@ -637,6 +656,7 @@ class MainActivity : AppCompatActivity() {
         synchronized(recordedPcm) { recordedPcm.reset() }
         voiceMeter.reset()
         binding.btnVoice.text = getString(R.string.voice_button_start)
+        voiceTurnEnded(error = false)
     }
 
     private fun closeVoiceScreen() {
@@ -649,7 +669,53 @@ class MainActivity : AppCompatActivity() {
      * The microphone could not start: the voice screen never opens. Pairing mode: a notice in the conversation
      * (it hides the welcome like a message does); shared-token mode: the status line, as before.
      */
-    private fun voiceStartFailed(text: String) = voiceNotice(text)
+    private fun voiceStartFailed(text: String) {
+        voiceNotice(text)
+        voiceTurnEnded(error = true)
+    }
+
+    /**
+     * Demo lentes. Switch off: the usual recording, unchanged. Switch on: the Bluetooth route first (off the UI
+     * thread, up to GlassesAudio.ROUTE_TIMEOUT_MS), the "escuchando" tone, then the usual recording; without the
+     * route, the phone's microphone and speaker with a notice.
+     */
+    private fun beginVoice() {
+        if (!GlassesSettings.enabled(this)) {
+            startRecording()
+            return
+        }
+        if (glassesStarting || isRecording || (pairing.configured && voiceFlow.busy)) return
+        glassesStarting = true
+        val turn = ++voiceTurn
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        lifecycleScope.launch(Dispatchers.IO) {
+            val routed = glassesAudio.acquire()
+            VoiceCues.play(VoiceCues.Cue.LISTENING, routed)
+            delay(VoiceCues.Cue.LISTENING.ms + CUE_GAP_MS)  // The tone never reaches the recording.
+            runOnUiThread {
+                glassesStarting = false
+                if (turn != voiceTurn) return@runOnUiThread
+                if (!routed) voiceNotice(getString(R.string.glasses_unavailable))
+                startRecording()
+                if (!isRecording) voiceTurnEnded(error = false)
+            }
+        }
+    }
+
+    /**
+     * Demo lentes: end of a voice turn (answer spoken, nothing heard, cancelled or failed). The error tone, then
+     * the route goes back to the phone and the screen may sleep. Nothing happens with the switch off.
+     */
+    private fun voiceTurnEnded(error: Boolean) {
+        if (!GlassesSettings.enabled(this) && !glassesAudio.active) return
+        if (error) VoiceCues.play(VoiceCues.Cue.ERROR, glassesAudio.active)
+        val turn = voiceTurn
+        binding.root.postDelayed({
+            if (turn != voiceTurn || isRecording || glassesStarting) return@postDelayed
+            window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            glassesAudio.release()
+        }, if (error) VoiceCues.Cue.ERROR.ms + CUE_GAP_MS else 0L)
+    }
 
     private fun stopRecording() {
         isRecording = false
@@ -671,6 +737,7 @@ class MainActivity : AppCompatActivity() {
         if (pcm.isEmpty()) {
             voiceFlow.on(VoiceEvent.FAILED)
             voiceNotice(getString(R.string.voice_recording_empty))  // No provisional bubble: nothing was recorded.
+            voiceTurnEnded(error = true)
             updateInputs()
             return
         }
@@ -692,6 +759,7 @@ class MainActivity : AppCompatActivity() {
             if (!pairing.configured) updateStatus(getString(R.string.voice_saved, duration))
             // Run the full voice pipeline off the UI thread:
             // transcribe (Vosk) → Ollama chat → Piper synthesis → MediaPlayer playback.
+            if (GlassesSettings.enabled(this)) VoiceCues.play(VoiceCues.Cue.THINKING, glassesAudio.active)
             isProcessing = true
             setState(UiState.Transcribing)
             runVoicePipeline(wav)
@@ -701,6 +769,7 @@ class MainActivity : AppCompatActivity() {
                 showChange(chatLog.voiceFailed(voiceMessage, null, VoiceStep.TRANSCRIBE, getString(R.string.voice_save_failed)))
             } else updateStatus(getString(R.string.voice_save_failed))
             isProcessing = false
+            voiceTurnEnded(error = true)
             updateInputs()
         }
     }
@@ -966,11 +1035,13 @@ class MainActivity : AppCompatActivity() {
             mediaPlayer = MediaPlayer().apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        // Demo lentes: with the Bluetooth route the answer goes with the call audio (to the glasses).
+                        .setUsage(if (glassesAudio.active) AudioAttributes.USAGE_VOICE_COMMUNICATION else AudioAttributes.USAGE_MEDIA)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build()
                 )
                 setDataSource(file.absolutePath)
+                if (android.os.Build.VERSION.SDK_INT >= 28) glassesAudio.output?.let { setPreferredDevice(it) }
                 setOnPreparedListener { mp ->
                     voiceFlow.on(VoiceEvent.AUDIO_READY)
                     voiceTiming("audio_start")
