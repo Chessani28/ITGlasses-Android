@@ -8,6 +8,7 @@ import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
 import android.os.SystemClock
+import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import java.util.concurrent.CountDownLatch
@@ -39,12 +40,15 @@ internal class GlassesAudio(context: Context) {
     @Synchronized
     fun acquire(): Boolean {
         if (active) return true
-        val am = audio ?: return false
+        val am = audio ?: return false.also { GlassesLog.d("acquire result=no_audio_manager") }
+        val started = SystemClock.elapsedRealtime()
+        GlassesLog.d("acquire start api=${Build.VERSION.SDK_INT}")
         return try {
             previousMode = am.mode
             am.mode = AudioManager.MODE_IN_COMMUNICATION
             val routed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) routeModern(am) else routeLegacy(am)
             if (!routed) {
+                GlassesLog.d("acquire result=no_route ms=${SystemClock.elapsedRealtime() - started}")
                 release()
                 return false
             }
@@ -52,8 +56,11 @@ internal class GlassesAudio(context: Context) {
             input = am.getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull { it.type in BLUETOOTH_TYPES }
             output = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.type in BLUETOOTH_TYPES }
             active = true
+            GlassesLog.d("acquire result=ok ms=${SystemClock.elapsedRealtime() - started} input=${input?.type ?: "none"} " +
+                "output=${output?.type ?: "none"}")
             true
         } catch (e: Exception) {
+            GlassesLog.d("acquire result=error type=${GlassesLog.safe(e.javaClass.simpleName)}")
             release()
             false
         }
@@ -64,6 +71,7 @@ internal class GlassesAudio(context: Context) {
     fun release() {
         val am = audio ?: return
         if (!active && previousMode == null) return
+        GlassesLog.d("release was_active=$active")
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 am.clearCommunicationDevice()
@@ -85,23 +93,27 @@ internal class GlassesAudio(context: Context) {
 
     @RequiresApi(Build.VERSION_CODES.S)
     private fun routeModern(am: AudioManager): Boolean {
-        val device = am.availableCommunicationDevices.firstOrNull { it.type in BLUETOOTH_TYPES } ?: return false
-        if (!am.setCommunicationDevice(device)) return false
+        val available = am.availableCommunicationDevices
+        GlassesLog.d("modern devices=${available.joinToString(",") { it.type.toString() }}")
+        val device = available.firstOrNull { it.type in BLUETOOTH_TYPES }
+            ?: return false.also { GlassesLog.d("modern result=no_bluetooth_device") }
+        if (!am.setCommunicationDevice(device)) return false.also { GlassesLog.d("modern result=set_refused") }
         val deadline = SystemClock.elapsedRealtime() + ROUTE_TIMEOUT_MS
         while (SystemClock.elapsedRealtime() < deadline) {
             if (am.communicationDevice?.id == device.id) return true
             Thread.sleep(POLL_MS)
         }
+        GlassesLog.d("modern result=timeout")
         return false
     }
 
     @Suppress("DEPRECATION")
     private fun routeLegacy(am: AudioManager): Boolean {
-        if (!am.isBluetoothScoAvailableOffCall) return false
+        if (!am.isBluetoothScoAvailableOffCall) return false.also { GlassesLog.d("legacy result=sco_unavailable") }
         val headset = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
             it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
         }
-        if (!headset) return false
+        if (!headset) return false.also { GlassesLog.d("legacy result=no_headset") }
         val connected = CountDownLatch(1)
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
@@ -116,6 +128,7 @@ internal class GlassesAudio(context: Context) {
             am.startBluetoothSco()
             am.isBluetoothScoOn = true
             connected.await(ROUTE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .also { GlassesLog.d("legacy result=${if (it) "connected" else "timeout"}") }
         } finally {
             try { app.unregisterReceiver(receiver) } catch (_: Exception) { }
         }
@@ -129,4 +142,20 @@ internal class GlassesAudio(context: Context) {
         /** Classic Bluetooth headset (SCO) and, on API 31+, LE Audio headsets (TYPE_BLE_HEADSET = 26). */
         private val BLUETOOTH_TYPES = setOf(AudioDeviceInfo.TYPE_BLUETOOTH_SCO, 26)
     }
+}
+
+/**
+ * Demo lentes: debug-only diagnostics in logcat (tag ITG-Glasses): route steps, results, device types (numbers) and
+ * timings. Never audio, text, device names or addresses.
+ */
+internal object GlassesLog {
+    const val TAG = "ITG-Glasses"
+    private val unsafe = Regex("[^A-Za-z0-9_]")
+
+    fun d(line: String) {
+        if (!BuildConfig.DEBUG) return
+        Log.d(TAG, line)
+    }
+
+    fun safe(value: String): String = value.replace(unsafe, "").take(40).ifEmpty { "Unknown" }
 }

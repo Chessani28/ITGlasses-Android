@@ -577,6 +577,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         endOfSpeech = if (GlassesSettings.enabled(this)) EndOfSpeech() else null
+        if (endOfSpeech != null) GlassesLog.d("record start mic=${MicSources.name(micSource)} preferred=${glassesAudio.input?.type ?: "none"}")
         isRecording = true
         recordingStartMs = System.currentTimeMillis()
         if (pairing.configured) {
@@ -599,6 +600,8 @@ class MainActivity : AppCompatActivity() {
                     voiceMeter.onSamples(buffer, read)  // Level for the voice screen; no allocation.
                     // Demo lentes: automatic end of speech, only with "Usar lentes" on (null otherwise).
                     ended = endOfSpeech?.onBlock(voiceMeter.level, EndOfSpeech.blockMs(read)) == true
+                    if (ended) GlassesLog.d("vad end ms=${System.currentTimeMillis() - recordingStartMs} " +
+                        "threshold=${"%.2f".format(java.util.Locale.ROOT, endOfSpeech?.threshold ?: 0f)}")
                     val bb = ByteBuffer.allocate(read * 2).order(ByteOrder.LITTLE_ENDIAN)
                     for (i in 0 until read) bb.putShort(buffer[i])
                     synchronized(recordedPcm) {
@@ -1042,6 +1045,7 @@ class MainActivity : AppCompatActivity() {
                 )
                 setDataSource(file.absolutePath)
                 if (android.os.Build.VERSION.SDK_INT >= 28) glassesAudio.output?.let { setPreferredDevice(it) }
+                if (GlassesSettings.enabled(this@MainActivity)) GlassesLog.d("playback route=${if (glassesAudio.active) "bluetooth" else "phone"}")
                 setOnPreparedListener { mp ->
                     voiceFlow.on(VoiceEvent.AUDIO_READY)
                     voiceTiming("audio_start")

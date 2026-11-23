@@ -50,6 +50,13 @@ class GlassesWiringTest {
         assertTrue(activity.contains("FLAG_KEEP_SCREEN_ON"))
     }
 
+    @Test fun glassesLogIsDebugOnlyAndNeverLogsNames() {
+        val audio = ModuleFiles.file("src/main/java/com/itglasses/itglassesandroid/GlassesAudio.kt").readText()
+        assertTrue(audio.contains("const val TAG = \"ITG-Glasses\""))
+        assertTrue(audio.contains("if (!BuildConfig.DEBUG) return"))
+        for (leak in listOf("productName", ".address", "Log.i(", "Log.w(", "Log.e(")) assertTrue(leak, !audio.contains(leak))
+    }
+
     @Test fun busyRetryIsTheOutermostInterceptor() {
         val builder = activity.substringAfter("OkHttpClient.Builder()")
         assertTrue(builder.indexOf(".addInterceptor(BusyRetryInterceptor())") in 0 until builder.indexOf("pairing.authorize(chain)"))
