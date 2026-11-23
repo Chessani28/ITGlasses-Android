@@ -93,7 +93,19 @@ class BackgroundVoiceTest {
         assertTrue(service.contains("BackgroundVoice.set(this, false)"))
         assertTrue(service.contains("BackgroundTurns.startFailures.tryEmit(Unit)"))
         assertTrue(activity.contains("BackgroundTurns.startFailures.collect { backgroundFailed() }"))
-        assertTrue(activity.contains("if (!VoiceForegroundService.start(this)) backgroundFailed()"))
+        val activityLf = activity.replace("\r\n", "\n")
+        // Android refuses the start request: back to the usual mode right away.
+        val start = activityLf.substringAfter("private fun startBackgroundVoice() {").substringBefore("\n    }\n")
+        val refused = start.substringAfter("if (!VoiceForegroundService.start(this)) {").substringBefore("}")
+        assertTrue("si Android rechaza el arranque", refused.contains("backgroundFailed()") && refused.contains("return"))
+        // Accepted but not running 3 s later: also back to the usual mode.
+        assertTrue("si no arrancó a los 3 s",
+            start.contains("if (BackgroundVoice.enabled(this@MainActivity) && !BackgroundTurns.running.value) backgroundFailed()"))
+        // What "the usual mode" means: setting off, switch off, a notice.
+        val failed = activityLf.substringAfter("private fun backgroundFailed(").substringBefore("\n    }\n")
+        for (step in listOf("BackgroundVoice.set(this, false)", "binding.swBackground.isChecked = false", "voiceNotice(text)")) {
+            assertTrue(step, failed.contains(step))
+        }
     }
 
     @Test fun duplicatedLogicIsMarkedToUnify() {
