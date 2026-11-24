@@ -75,3 +75,28 @@ dependencies {
     metaImplementation 'com.meta.wearable:mwdat-core:1.0.1'
     testImplementation 'junit:junit:4.13.2'
 }
+
+// The debug network security config is generated from ITGLASSES_PAIRING_ORIGIN, so no LAN address is versioned
+// (template: app/src/debug/network_security_config.template.xml). The pilot CA is trusted only for that host.
+def networkSecurityRes = layout.buildDirectory.dir("generated/network-security/res").get().asFile
+def generateNetworkSecurity = tasks.register("generateDebugNetworkSecurityConfig") {
+    def origin = providers.gradleProperty("ITGLASSES_PAIRING_ORIGIN").getOrElse("")
+    def template = file("src/debug/network_security_config.template.xml")
+    def output = new File(networkSecurityRes, "xml/network_security_config.xml")
+    inputs.property("origin", origin)
+    inputs.file(template)
+    outputs.file(output)
+    doLast {
+        def host = origin ? new URI(origin).host : ""
+        def pilot = host ? """<domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">${host}</domain>
+        <trust-anchors>
+            <certificates src="@raw/itglasses_pilot_ca" />
+        </trust-anchors>
+    </domain-config>""" : "<!-- ITGLASSES_PAIRING_ORIGIN not set: no pilot CA -->"
+        output.parentFile.mkdirs()
+        output.setText(template.getText("UTF-8").replace("<!-- @PAIRING_DOMAIN_CONFIG@ -->", pilot), "UTF-8")
+    }
+}
+android.sourceSets.debug.res.srcDir(networkSecurityRes)
+tasks.named("preBuild") { dependsOn generateNetworkSecurity }

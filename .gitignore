@@ -47,3 +47,7 @@ generated/
 
 # Respaldos comprimidos locales
 *.zip
+
+# Auditorias locales (se guardan fuera del repo)
+/*.pdf
+audit_*.md

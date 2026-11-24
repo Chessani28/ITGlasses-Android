@@ -1,16 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Template of res/xml/network_security_config.xml for debug builds. app/build.gradle writes the real file to
+     build/generated/network-security/res, adding the trust of the pilot CA for the host of ITGLASSES_PAIRING_ORIGIN
+     (-PITGLASSES_PAIRING_ORIGIN=https://<IP de la PC>:8443), so no LAN address is versioned. Without that
+     property the debug build trusts only the system CAs and allows cleartext to this device only. -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
     </base-config>
-    <domain-config cleartextTrafficPermitted="false">
-        <domain includeSubdomains="false">172.16.5.143</domain>
-        <trust-anchors>
-            <certificates src="@raw/itglasses_pilot_ca" />
-        </trust-anchors>
-    </domain-config>
+    <!-- @PAIRING_DOMAIN_CONFIG@ -->
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">127.0.0.1</domain>
         <domain includeSubdomains="false">localhost</domain>
