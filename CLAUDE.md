@@ -38,8 +38,9 @@ $env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
 .\gradlew.bat assemblePhoneDebug
 ```
 APK: `app\build\outputs\apk\phone\debug\app-phone-debug.apk`. Instalar con `adb install -r ...` solo si te lo pido
-(lo hago yo con el celular conectado). `lintMetaDebug` ya falla por un problema previo
-(`app/src/meta/AndroidManifest.xml`, falta `android:exported`): no es culpa de tu cambio; no lo toques salvo que te lo pida.
+(lo hago yo con el celular conectado). `lintMetaDebug`: el `android:exported` del flavor `meta` ya está corregido;
+hoy solo falla por `local.properties` (la ruta del SDK con `\` sin escapar, `PropertyEscape`). Es un archivo local que
+no se toca: lo corrijo yo si hace falta.
 
 ## Reglas de trabajo
 1. **Ramas:** trabaja siempre en una rama nueva `feature/...`, nunca en `master`. Créala desde la rama que yo indique;
