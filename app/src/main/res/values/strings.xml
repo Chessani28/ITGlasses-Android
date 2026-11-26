@@ -119,4 +119,26 @@
     <string name="voice_screen_stop">Detener y enviar</string>
     <string name="voice_screen_cancel">Cancelar</string>
     <string name="voice_screen_hint">Toca Detener y enviar cuando termines.</string>
+    <!-- Demo lentes -->
+    <string name="glasses_switch">Usar lentes (Bluetooth)</string>
+    <string name="glasses_unavailable">No se pudieron usar los lentes por Bluetooth; se usarán el micrófono y el altavoz del celular.</string>
+    <string name="media_probe_switch">Prueba: botón de los lentes (diagnóstico)</string>
+    <!-- Background voice -->
+    <string name="background_switch">Escuchar con el celular bloqueado</string>
+    <string name="background_needs_pairing">Primero empareja este celular con el servidor.</string>
+    <string name="background_start_failed">No se pudo activar la escucha con el celular bloqueado; sigue el modo con la app abierta.</string>
+    <string name="background_channel">Asistente de voz</string>
+    <string name="background_title">ITGlasses</string>
+    <string name="background_ready">Listo. Toca la patilla de los lentes o «Hablar».</string>
+    <string name="background_listening">Escuchando…</string>
+    <string name="background_thinking">Pensando…</string>
+    <string name="background_speaking">Respondiendo…</string>
+    <string name="background_failed">No se pudo responder. Vuelve a intentarlo.</string>
+    <string name="background_no_speech">No se reconoció ninguna voz.</string>
+    <string name="background_action_talk">Hablar</string>
+    <string name="background_action_send">Detener y enviar</string>
+    <string name="background_action_off">Apagar</string>
+    <string name="background_action_cancel">Cancelar</string>
+    <string name="background_cancelled">Turno cancelado.</string>
+    <string name="media_probe_busy">Apaga primero «Escuchar con el celular bloqueado» para usar la prueba del botón.</string>
 </resources>
