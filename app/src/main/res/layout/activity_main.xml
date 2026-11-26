@@ -290,6 +290,40 @@
     </LinearLayout>
 </ScrollView>
 
+    <!-- Pairing mode, Connected: the owner's chat history (ChatHistory). Hidden otherwise. -->
+    <LinearLayout
+        android:id="@+id/history_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/itg_surface"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:visibility="gone">
+
+        <Button
+            android:id="@+id/btn_history"
+            style="?attr/borderlessButtonStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:text="@string/history_open"/>
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1"/>
+
+        <Button
+            android:id="@+id/btn_new_conversation"
+            style="?attr/borderlessButtonStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:text="@string/history_new"/>
+    </LinearLayout>
+
     <LinearLayout
         android:id="@+id/message_bar"
         android:layout_width="match_parent"

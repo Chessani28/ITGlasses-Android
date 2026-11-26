@@ -141,4 +141,17 @@
     <string name="background_action_cancel">Cancelar</string>
     <string name="background_cancelled">Turno cancelado.</string>
     <string name="media_probe_busy">Apaga primero «Escuchar con el celular bloqueado» para usar la prueba del botón.</string>
+    <string name="history_open">Historial</string>
+    <string name="history_new">Nueva conversación</string>
+    <string name="history_title">Tus conversaciones</string>
+    <string name="history_empty">Aún no tienes conversaciones guardadas.</string>
+    <string name="history_more">Ver conversaciones anteriores…</string>
+    <string name="history_close">Cerrar</string>
+    <string name="history_current">Actual</string>
+    <string name="history_failed">No se pudo cargar el historial. Revisa la conexión e inténtalo de nuevo.</string>
+    <string name="history_no_owner">Este celular no tiene dueño asignado, así que no tiene historial.</string>
+    <string name="history_missing">Esa conversación ya no está disponible.</string>
+    <string name="history_new_failed">No se pudo empezar una conversación nueva. Inténtalo de nuevo.</string>
+    <string name="history_new_done">Conversación nueva. Tu siguiente pregunta empieza de cero.</string>
+    <string name="history_busy">Espera a que termine la respuesta.</string>
 </resources>

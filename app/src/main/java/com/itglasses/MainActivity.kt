@@ -337,6 +337,8 @@ class MainActivity : AppCompatActivity() {
         binding.btnDisconnect.setOnClickListener { disconnectFromBackend() }
         binding.btnSend.setOnClickListener { sendMessage() }
         binding.btnVoice.setOnClickListener { toggleRecording() }
+        binding.btnHistory.setOnClickListener { showHistory() }
+        binding.btnNewConversation.setOnClickListener { newConversation() }
         binding.swGlasses.isChecked = GlassesSettings.enabled(this)
         binding.swGlasses.setOnCheckedChangeListener { _, on -> GlassesSettings.set(this, on) }
         binding.swMediaProbe.visibility = if (BuildConfig.DEBUG) android.view.View.VISIBLE else android.view.View.GONE
@@ -457,6 +459,12 @@ class MainActivity : AppCompatActivity() {
         val inputs = InputLock.of(voiceAllowed(), chatInFlight, voiceFlow.stage, busy)
         binding.btnSend.isEnabled = inputs.send
         binding.btnVoice.isEnabled = inputs.voice
+        // History: only while Connected; opening or starting one never overlaps a question on its way.
+        binding.historyBar.visibility =
+            if (pairingController.state.value == PairingState.Connected) android.view.View.VISIBLE else android.view.View.GONE
+        val historyFree = inputs.voice && backgroundMessage == null && !historyBusy
+        binding.btnHistory.isEnabled = historyFree
+        binding.btnNewConversation.isEnabled = historyFree
     }
 
     /** UI thread: a conversation change, then the welcome (any entry, message or notice, hides it). */
@@ -642,6 +650,138 @@ class MainActivity : AppCompatActivity() {
                     updateStatus("Connected")
                     binding.btnSend.isEnabled = true
                 }
+            }
+        }
+    }
+
+    // ---- Chat history (ChatHistory): the owner's own conversations; open one to continue it, or start a new one. ----
+
+    private var historyBusy = false
+
+    private fun historyRequest(path: String, id: String? = null, cursor: String? = null): Request {
+        val json = org.json.JSONObject()
+        id?.let { json.put("id", it) }
+        cursor?.let { json.put("cursor", it) }
+        return Request.Builder().url("${pairing.origin}$path")
+            .post(json.toString().toRequestBody("application/json".toMediaType())).build()
+    }
+
+    /** IO thread: the JSON body of a history call, or null with the notice to show when it failed. */
+    private fun historyCall(request: Request): Pair<org.json.JSONObject?, Int?> = try {
+        okHttpClient.newCall(request).execute().use { response ->
+            val body = response.body?.string()
+            when {
+                response.isSuccessful && body != null -> org.json.JSONObject(body) to null
+                response.code == 403 && body?.contains("device_without_owner") == true -> null to R.string.history_no_owner
+                response.code == 404 -> null to R.string.history_missing
+                else -> null to R.string.history_failed
+            }
+        }
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null to R.string.history_failed
+    }
+
+    private fun historyToast(text: Int) = android.widget.Toast.makeText(this, text, android.widget.Toast.LENGTH_LONG).show()
+
+    /** UI thread: false (with a notice) while a question is on its way or another history call runs. */
+    private fun historyStart(): Boolean {
+        if (!binding.btnHistory.isEnabled) {
+            historyToast(R.string.history_busy)
+            return false
+        }
+        historyBusy = true
+        updateInputs()
+        return true
+    }
+
+    private fun historyDone() {
+        historyBusy = false
+        updateInputs()
+    }
+
+    private fun showHistory(loaded: List<HistoryItem> = emptyList(), cursor: String? = null) {
+        if (!historyStart()) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            val (json, failure) = historyCall(historyRequest(ChatHistory.LIST, cursor = cursor))
+            val items = loaded + (json?.optJSONArray("conversations")?.let { array ->
+                (0 until array.length()).mapNotNull { array.optJSONObject(it) }.mapNotNull { item ->
+                    val id = item.optString("id").takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+                    HistoryItem(id, item.optString("title").takeIf { !item.isNull("title") },
+                        item.optLong("last_message_at"), item.optInt("message_count"), item.optString("channel"),
+                        item.optString("device_label").takeIf { !item.isNull("device_label") })
+                }
+            } ?: emptyList())
+            val next = json?.optString("next_cursor")?.takeIf { !json.isNull("next_cursor") && it.isNotEmpty() }
+            runOnUiThread {
+                historyDone()
+                if (json == null) historyToast(failure ?: R.string.history_failed) else historyDialog(items, next)
+            }
+        }
+    }
+
+    private fun historyDialog(items: List<HistoryItem>, next: String?) {
+        if (isFinishing || isDestroyed) return
+        val now = System.currentTimeMillis()
+        val rows: List<CharSequence> = items.map { item ->
+            val title = HistoryTexts.title(item)
+            val current = if (item.id == assistantSession) " · ${getString(R.string.history_current)}" else ""
+            android.text.SpannableStringBuilder(title).apply {
+                setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD), 0, title.length, 0)
+                append("\n")
+                val start = length
+                append(HistoryTexts.subtitle(item, now) + current)
+                setSpan(android.text.style.RelativeSizeSpan(0.85f), start, length, 0)
+            }
+        } + listOfNotNull(next?.let { getString(R.string.history_more) })
+        val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(R.string.history_title)
+            .setNegativeButton(R.string.history_close, null)
+        if (rows.isEmpty()) dialog.setMessage(R.string.history_empty)
+        else dialog.setItems(rows.toTypedArray()) { _, index ->
+            if (index < items.size) openConversation(items[index].id) else showHistory(items, next)
+        }
+        dialog.show()
+    }
+
+    /** Open [id]: the next typed, voice and glasses questions continue it; its messages replace the chat. */
+    private fun openConversation(id: String) {
+        if (!historyStart()) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            val (opened, openFailure) = historyCall(historyRequest(ChatHistory.OPEN, id = id))
+            val (json, failure) = if (opened == null) null to openFailure
+                else historyCall(historyRequest(ChatHistory.READ, id = id))
+            val messages = json?.optJSONObject("conversation")?.optJSONArray("messages")?.let { array ->
+                (0 until array.length()).mapNotNull { array.optJSONObject(it) }
+                    .map { HistoryMessage(it.optString("role"), it.optString("content")) }
+            }
+            runOnUiThread {
+                historyDone()
+                if (messages == null) {
+                    historyToast(failure ?: R.string.history_failed)
+                    return@runOnUiThread
+                }
+                assistantSession = AssistantSession.next(null, id)
+                showChange(chatLog.replaceWith(messages))
+            }
+        }
+    }
+
+    /** "Nueva conversación": the next question (typed, voice or glasses) starts a new one; the chat empties. */
+    private fun newConversation() {
+        if (!historyStart()) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            val (json, failure) = historyCall(historyRequest(ChatHistory.NEW))
+            runOnUiThread {
+                historyDone()
+                if (json == null) {
+                    historyToast(if (failure == R.string.history_no_owner) failure else R.string.history_new_failed)
+                    return@runOnUiThread
+                }
+                assistantSession = null
+                showChange(chatLog.clear())
+                historyToast(R.string.history_new_done)
             }
         }
     }

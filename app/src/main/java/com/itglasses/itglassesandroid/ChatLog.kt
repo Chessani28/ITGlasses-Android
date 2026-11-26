@@ -82,7 +82,28 @@ internal class ChatLog(private val limit: Int = 100) {
         return finish(listOfNotNull(notice?.let { ChatEntry.Notice(nextId++, it) }), removed)
     }
 
-    // ---- Voice (stage B). The Activity resolves every text; nothing here reads bodies or exceptions. ----
+    // ---- History: an opened conversation replaces what is shown; "Nueva conversación" empties it. ----
+
+    /**
+     * The saved messages of an opened conversation (sent questions and answers, the newest [limit]); everything shown
+     * before goes away. Empty or unknown messages are skipped. Empty result: the welcome may show again.
+     */
+    fun replaceWith(messages: List<HistoryMessage>): ChatChange {
+        val removed = removeAll { true }
+        val added = messages.filter { it.content.isNotBlank() }.mapNotNull { message ->
+            when (message.role) {
+                "user" -> ChatEntry.User(nextId++, message.content, ChatEntry.Status.SENT)
+                "assistant" -> ChatEntry.Assistant(nextId++, message.content)
+                else -> null
+            }
+        }.takeLast(limit)
+        return finish(added, removed)
+    }
+
+    /** "Nueva conversación": nothing shown, the welcome may show again. */
+    fun clear(): ChatChange = ChatChange(removed = removeAll { true })
+
+    // ---- Voice (stage B).The Activity resolves every text; nothing here reads bodies or exceptions. ----
 
     /** "Detener y enviar": provisional bubble on the right with "Transcribiendo". Drops a pending "Comprobando". */
     fun voiceStarted(): Pair<Long, ChatChange> {

@@ -26,10 +26,14 @@ class ChatTextsTest {
         val root = ModuleFiles.xml("src/main/res/layout/activity_main.xml")
         assertEquals("LinearLayout", root.tagName)
         val children = (0 until root.childNodes.length).mapNotNull { root.childNodes.item(it) as? org.w3c.dom.Element }
-        assertEquals(listOf("@+id/main_scroll", "@+id/message_bar"), children.map { it.getAttributeNS(ModuleFiles.ANDROID, "id") })
+        // The history bar (Historial / Nueva conversación) sits fixed just above the message bar.
+        assertEquals(listOf("@+id/main_scroll", "@+id/history_bar", "@+id/message_bar"),
+            children.map { it.getAttributeNS(ModuleFiles.ANDROID, "id") })
         val bar = children.last()
         val inBar = ModuleFiles.elements(bar, "*").map { it.getAttributeNS(ModuleFiles.ANDROID, "id") }
         assertEquals(listOf("@+id/et_message", "@+id/btn_send"), inBar)
+        val history = ModuleFiles.elements(children[1], "*").map { it.getAttributeNS(ModuleFiles.ANDROID, "id") }
+        assertTrue("@+id/btn_history" in history && "@+id/btn_new_conversation" in history)
     }
 
     @Test fun conversationContainerAndSharedTokenOutputBothExist() {
