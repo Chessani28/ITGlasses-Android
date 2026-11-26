@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One conversation of the history: rounded, with the touch ripple. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="#223DDC97">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/itg_surface_raised" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+</ripple>

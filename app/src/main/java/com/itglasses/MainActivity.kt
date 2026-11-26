@@ -701,48 +701,137 @@ class MainActivity : AppCompatActivity() {
         updateInputs()
     }
 
-    private fun showHistory(loaded: List<HistoryItem> = emptyList(), cursor: String? = null) {
+    /** IO thread: one page of this phone's conversations, the next cursor, or the notice when it failed. */
+    private fun historyPage(cursor: String?): Triple<List<HistoryItem>?, String?, Int?> {
+        val (json, failure) = historyCall(historyRequest(ChatHistory.LIST, cursor = cursor))
+        if (json == null) return Triple(null, null, failure ?: R.string.history_failed)
+        val items = json.optJSONArray("conversations")?.let { array ->
+            (0 until array.length()).mapNotNull { array.optJSONObject(it) }.mapNotNull { item ->
+                val id = item.optString("id").takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+                val sources = item.optJSONObject("sources")
+                HistoryItem(id, item.optString("title").takeIf { !item.isNull("title") },
+                    item.optLong("last_message_at"), item.optInt("message_count"),
+                    sources?.optInt("phone") ?: 0, sources?.optInt("glasses") ?: 0)
+            }
+        } ?: emptyList()
+        val next = json.optString("next_cursor").takeIf { !json.isNull("next_cursor") && it.isNotEmpty() }
+        return Triple(items, next, null)
+    }
+
+    private fun showHistory() {
         if (!historyStart()) return
         lifecycleScope.launch(Dispatchers.IO) {
-            val (json, failure) = historyCall(historyRequest(ChatHistory.LIST, cursor = cursor))
-            val items = loaded + (json?.optJSONArray("conversations")?.let { array ->
-                (0 until array.length()).mapNotNull { array.optJSONObject(it) }.mapNotNull { item ->
-                    val id = item.optString("id").takeIf { it.isNotEmpty() } ?: return@mapNotNull null
-                    HistoryItem(id, item.optString("title").takeIf { !item.isNull("title") },
-                        item.optLong("last_message_at"), item.optInt("message_count"), item.optString("channel"),
-                        item.optString("device_label").takeIf { !item.isNull("device_label") })
-                }
-            } ?: emptyList())
-            val next = json?.optString("next_cursor")?.takeIf { !json.isNull("next_cursor") && it.isNotEmpty() }
+            val (items, next, failure) = historyPage(null)
             runOnUiThread {
                 historyDone()
-                if (json == null) historyToast(failure ?: R.string.history_failed) else historyDialog(items, next)
+                if (items == null) historyToast(failure ?: R.string.history_failed) else historySheet(items, next)
             }
         }
     }
 
-    private fun historyDialog(items: List<HistoryItem>, next: String?) {
+    /** This phone's conversations in a bottom sheet, by day, each with its phone or glasses icon. */
+    private fun historySheet(first: List<HistoryItem>, firstNext: String?) {
         if (isFinishing || isDestroyed) return
-        val now = System.currentTimeMillis()
-        val rows: List<CharSequence> = items.map { item ->
-            val title = HistoryTexts.title(item)
-            val current = if (item.id == assistantSession) " · ${getString(R.string.history_current)}" else ""
-            android.text.SpannableStringBuilder(title).apply {
-                setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD), 0, title.length, 0)
-                append("\n")
-                val start = length
-                append(HistoryTexts.subtitle(item, now) + current)
-                setSpan(android.text.style.RelativeSizeSpan(0.85f), start, length, 0)
+        val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
+        val view = layoutInflater.inflate(R.layout.history_sheet, null)
+        val rows = view.findViewById<android.widget.LinearLayout>(R.id.history_rows)
+        var items = first
+        var next = firstNext
+        var loading = false
+        fun render() {
+            rows.removeAllViews()
+            if (items.isEmpty()) {
+                rows.addView(android.widget.TextView(this).apply {
+                    setText(R.string.history_empty)
+                    setTextColor(ContextCompat.getColor(context, R.color.itg_text_secondary))
+                    textSize = 14f
+                    setPadding(dp(8), dp(24), dp(8), dp(24))
+                    gravity = android.view.Gravity.CENTER
+                })
+                return
             }
-        } + listOfNotNull(next?.let { getString(R.string.history_more) })
-        val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle(R.string.history_title)
-            .setNegativeButton(R.string.history_close, null)
-        if (rows.isEmpty()) dialog.setMessage(R.string.history_empty)
-        else dialog.setItems(rows.toTypedArray()) { _, index ->
-            if (index < items.size) openConversation(items[index].id) else showHistory(items, next)
+            for (group in HistoryTexts.groups(items, System.currentTimeMillis())) {
+                rows.addView(android.widget.TextView(this).apply {
+                    text = group.label
+                    setTextColor(ContextCompat.getColor(context, R.color.itg_text_secondary))
+                    textSize = 12f
+                    setTypeface(typeface, android.graphics.Typeface.BOLD)
+                    letterSpacing = 0.05f
+                    setPadding(dp(8), dp(16), dp(8), dp(2))
+                    androidx.core.view.ViewCompat.setAccessibilityHeading(this, true)
+                })
+                for (item in group.items) rows.addView(historyRow(rows, item) {
+                    sheet.dismiss()
+                    openConversation(item.id)
+                })
+            }
+            next?.let { cursor ->
+                rows.addView(android.widget.Button(this, null, android.R.attr.borderlessButtonStyle).apply {
+                    setText(R.string.history_more)
+                    setTextColor(ContextCompat.getColor(context, R.color.itg_accent))
+                    setOnClickListener {
+                        if (loading) return@setOnClickListener
+                        loading = true
+                        isEnabled = false
+                        lifecycleScope.launch(Dispatchers.IO) {
+                            val (more, after, failure) = historyPage(cursor)
+                            runOnUiThread {
+                                loading = false
+                                if (more == null) {
+                                    isEnabled = true
+                                    historyToast(failure ?: R.string.history_failed)
+                                } else {
+                                    items = items + more.filter { item -> items.none { it.id == item.id } }
+                                    next = after
+                                    render()
+                                }
+                            }
+                        }
+                    }
+                })
+            }
         }
-        dialog.show()
+        render()
+        view.findViewById<android.view.View>(R.id.history_sheet_new).setOnClickListener {
+            sheet.dismiss()
+            newConversation()
+        }
+        sheet.setContentView(view)
+        // The sheet draws its own rounded background; tall lists open expanded and scroll inside.
+        sheet.findViewById<android.view.View>(com.google.android.material.R.id.design_bottom_sheet)
+            ?.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        sheet.behavior.skipCollapsed = true
+        sheet.behavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED
+        sheet.show()
+    }
+
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+
+    /** One conversation: icon (phone, glasses, or glasses with a small phone), title, time and messages. */
+    private fun historyRow(parent: android.view.ViewGroup, item: HistoryItem, open: () -> Unit): android.view.View {
+        val row = layoutInflater.inflate(R.layout.history_row, parent, false)
+        val current = item.id == assistantSession
+        if (current) row.setBackgroundResource(R.drawable.bg_history_row_current)
+        val icon = row.findViewById<android.widget.ImageView>(R.id.history_row_icon)
+        val badge = row.findViewById<android.widget.ImageView>(R.id.history_row_badge)
+        when (item.origin) {
+            HistoryOrigin.PHONE -> icon.setImageResource(R.drawable.ic_phone)
+            HistoryOrigin.GLASSES -> icon.setImageResource(R.drawable.ic_glasses)
+            HistoryOrigin.BOTH -> {
+                icon.setImageResource(R.drawable.ic_glasses)
+                badge.visibility = android.view.View.VISIBLE
+            }
+        }
+        val title = HistoryTexts.title(item)
+        val subtitle = HistoryTexts.subtitle(item, System.currentTimeMillis())
+        row.findViewById<android.widget.TextView>(R.id.history_row_title).text = title
+        row.findViewById<android.widget.TextView>(R.id.history_row_subtitle).text = subtitle
+        row.findViewById<android.view.View>(R.id.history_row_current).visibility =
+            if (current) android.view.View.VISIBLE else android.view.View.GONE
+        row.contentDescription = listOfNotNull(title, HistoryTexts.originText(item.origin), subtitle,
+            if (current) getString(R.string.history_current) else null).joinToString(". ")
+        row.setOnClickListener { open() }
+        return row
     }
 
     /** Open [id]: the next typed, voice and glasses questions continue it; its messages replace the chat. */
@@ -1264,9 +1353,11 @@ class MainActivity : AppCompatActivity() {
      * Chat request. Pairing mode: /api/v1/assistant/chat with the shared session (none on the first question: the
      * backend creates it). Shared-token mode: /api/v1/chat, as before.
      */
-    private fun chatRequest(baseUrl: String, message: String): Request {
+    private fun chatRequest(baseUrl: String, message: String, glasses: Boolean = false): Request {
         val json = org.json.JSONObject().put("message", message)
         if (pairing.configured) assistantSession?.let { json.put("session_id", it) }
+        // Heard through the glasses: the history shows the glasses icon (ChatVia).
+        if (pairing.configured) ChatVia.of(glasses)?.let { json.put("via", it) }
         return Request.Builder()
             .url(baseUrl + if (pairing.configured) ASSISTANT_ENDPOINT else CHAT_ENDPOINT)
             .post(json.toString().toRequestBody("application/json".toMediaType()))
@@ -1288,7 +1379,8 @@ class MainActivity : AppCompatActivity() {
     /** POST recognized text to the chat: the assistant in pairing mode, /api/v1/chat in shared-token mode. */
     private fun sendToOllama(message: String): AssistantReply {
         val baseUrl = backendUrl ?: throw IllegalStateException("Backend URL is not configured.")
-        return okHttpClient.newCall(chatRequest(baseUrl, message)).execute().use { response ->
+        val glasses = GlassesSettings.enabled(this) && glassesAudio.active
+        return okHttpClient.newCall(chatRequest(baseUrl, message, glasses)).execute().use { response ->
             val responseBody = response.body?.string() ?: ""
             if (!response.isSuccessful) {
                 if (pairing.configured) throw CallHttpException(response.code)  // Only the status, never the body.

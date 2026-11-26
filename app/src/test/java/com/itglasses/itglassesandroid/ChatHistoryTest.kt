@@ -12,9 +12,9 @@ class ChatHistoryTest {
     private fun at(year: Int, month: Int, day: Int, hour: Int, minute: Int): Long =
         Calendar.getInstance(zone).apply { clear(); set(year, month - 1, day, hour, minute) }.timeInMillis
 
-    private fun item(title: String? = "Impresora", channel: String = "device", label: String? = "Pixel 7",
-                     count: Int = 4, last: Long = at(2026, 11, 26, 14, 30) / 1000) =
-        HistoryItem("c1", title, last, count, channel, label)
+    private fun item(title: String? = "Impresora", count: Int = 4, last: Long = at(2026, 11, 26, 14, 30) / 1000,
+                     phone: Int = 2, glasses: Int = 0, id: String = "c1") =
+        HistoryItem(id, title, last, count, phone, glasses)
 
     @Test fun datesReadLikeAChatApp() {
         val now = at(2026, 11, 26, 18, 0)
@@ -26,11 +26,41 @@ class ChatHistoryTest {
         assertEquals("Ayer 23:00", HistoryTexts.whenText(at(2025, 12, 31, 23, 0), at(2026, 1, 1, 8, 0), zone))
     }
 
-    @Test fun theSubtitleSaysWhenWhereAndHowLong() {
+    @Test fun theSubtitleSaysWhenAndHowLongTheGroupSaysTheDay() {
         val now = at(2026, 11, 26, 18, 0)
-        assertEquals("Hoy 14:30 · Pixel 7 · 4 mensajes", HistoryTexts.subtitle(item(), now, zone))
-        assertEquals("Hoy 14:30 · Web · 1 mensaje", HistoryTexts.subtitle(item(channel = "web", count = 1), now, zone))
-        assertEquals("Celular", HistoryTexts.origin(item(label = " ")))
+        assertEquals("14:30 · 4 mensajes", HistoryTexts.subtitle(item(), now, zone))
+        assertEquals("09:05 · 1 mensaje", HistoryTexts.subtitle(item(count = 1, last = at(2026, 11, 25, 9, 5) / 1000), now, zone))
+        assertEquals("3 nov · 4 mensajes", HistoryTexts.subtitle(item(last = at(2026, 11, 3, 9, 5) / 1000), now, zone))
+    }
+
+    @Test fun theIconSaysWhereTheQuestionsWereAsked() {
+        assertEquals(HistoryOrigin.PHONE, item(phone = 3, glasses = 0).origin)
+        assertEquals(HistoryOrigin.GLASSES, item(phone = 0, glasses = 2).origin)
+        assertEquals(HistoryOrigin.BOTH, item(phone = 1, glasses = 1).origin)
+        assertEquals(HistoryOrigin.PHONE, item(phone = 0, glasses = 0).origin)   // no questions counted: the phone
+        assertEquals("Con los lentes", HistoryTexts.originText(HistoryOrigin.GLASSES))
+    }
+
+    @Test fun onlyQuestionsHeardThroughTheGlassesSayVia() {
+        assertEquals("glasses", ChatVia.of(true))
+        assertEquals(null, ChatVia.of(false))
+    }
+
+    @Test fun theListIsGroupedByDayKeepingItsOrder() {
+        val now = at(2026, 11, 26, 18, 0)
+        val items = listOf(
+            item(id = "a", last = at(2026, 11, 26, 9, 0) / 1000),
+            item(id = "b", last = at(2026, 11, 26, 8, 0) / 1000),
+            item(id = "c", last = at(2026, 11, 25, 20, 0) / 1000),
+            item(id = "d", last = at(2026, 11, 21, 20, 0) / 1000),
+            item(id = "e", last = at(2026, 11, 2, 20, 0) / 1000),
+            item(id = "f", last = at(2026, 10, 30, 20, 0) / 1000),
+        )
+        val groups = HistoryTexts.groups(items, now, zone)
+        assertEquals(listOf("Hoy", "Ayer", "Últimos 7 días", "Este mes", "Anteriores"), groups.map { it.label })
+        assertEquals(listOf("a", "b"), groups[0].items.map { it.id })
+        assertEquals(listOf("f"), groups.last().items.map { it.id })
+        assertTrue(HistoryTexts.groups(emptyList(), now, zone).isEmpty())
     }
 
     @Test fun aConversationWithoutTitleStillHasOne() {

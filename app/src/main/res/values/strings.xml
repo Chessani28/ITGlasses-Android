@@ -144,8 +144,10 @@
     <string name="history_open">Historial</string>
     <string name="history_new">Nueva conversación</string>
     <string name="history_title">Tus conversaciones</string>
-    <string name="history_empty">Aún no tienes conversaciones guardadas.</string>
-    <string name="history_more">Ver conversaciones anteriores…</string>
+    <string name="history_subtitle">En este celular y con sus lentes</string>
+    <string name="history_new_short">+ Nueva</string>
+    <string name="history_empty">Aún no hay conversaciones en este celular. Pregunta algo, escrito, por voz o con los lentes, y aparecerá aquí.</string>
+    <string name="history_more">Ver conversaciones anteriores</string>
     <string name="history_close">Cerrar</string>
     <string name="history_current">Actual</string>
     <string name="history_failed">No se pudo cargar el historial. Revisa la conexión e inténtalo de nuevo.</string>

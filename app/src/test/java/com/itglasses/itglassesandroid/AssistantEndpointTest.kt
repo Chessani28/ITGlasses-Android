@@ -12,8 +12,10 @@ class AssistantEndpointTest {
         assertTrue("el modo token compartido debe seguir con /api/v1/chat", activity.contains("CHAT_ENDPOINT = \"/api/v1/chat\""))
         assertTrue("el endpoint debe depender del modo",
             activity.contains("if (pairing.configured) ASSISTANT_ENDPOINT else CHAT_ENDPOINT"))
+        // Same request for both; the voice also says when it was heard through the glasses (history icon).
         assertTrue("el chat escrito y la voz deben usar la misma petición",
-            Regex("""chatRequest\(baseUrl, message\)""").findAll(activity).count() == 2)
+            Regex("""chatRequest\(baseUrl, message(, glasses)?\)""").findAll(activity).count() == 2)
+        assertTrue("la voz debe decir si vino de los lentes", activity.contains("chatRequest(baseUrl, message, glasses)"))
     }
 
     @Test fun oneSessionAndTheVoiceSkipsTheSources() {

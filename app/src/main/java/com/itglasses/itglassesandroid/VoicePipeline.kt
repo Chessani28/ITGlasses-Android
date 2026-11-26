@@ -151,7 +151,7 @@ internal class VoicePipeline(
                 return
             }
             BackgroundTurns.updates.tryEmit(TurnUpdate.Asked(text))
-            val (answer, speech) = ask(text)
+            val (answer, speech) = ask(text, routed)
             checkpoint()
             BackgroundTurns.updates.tryEmit(TurnUpdate.Answered(answer))
             val audio = synthesize(SpokenAnswer.of(answer, speech))
@@ -311,9 +311,10 @@ internal class VoicePipeline(
     }
 
     /** The answer and the backend's `speech` (what to read aloud), in the background session. */
-    private fun ask(message: String): Pair<String, String?> {
+    private fun ask(message: String, glasses: Boolean): Pair<String, String?> {
         val json = JSONObject().put("message", message)
         session?.let { json.put("session_id", it) }
+        ChatVia.of(glasses)?.let { json.put("via", it) }  // heard through the glasses: their icon in the history
         val request = Request.Builder().url(pairing.origin + ASSISTANT_ENDPOINT)
             .post(json.toString().toRequestBody("application/json".toMediaType())).build()
         return execute(request).use { response ->

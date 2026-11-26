@@ -20,15 +20,35 @@ internal object ChatHistory {
     const val NEW = "/api/v1/devices/me/conversations/new"
 }
 
-/** One row of the list. [lastMessageAt]: epoch seconds. [channel]: "web" or "device". */
+/** The chat request's "via": "glasses" when the question was heard through the glasses; nothing otherwise. */
+internal object ChatVia {
+    fun of(glasses: Boolean): String? = if (glasses) "glasses" else null
+}
+
+/** Where a conversation's questions were asked: their icons in the list (phone, glasses or both). */
+internal enum class HistoryOrigin { PHONE, GLASSES, BOTH }
+
+/**
+ * One row of the list (only this phone's conversations). [lastMessageAt]: epoch seconds. [phoneQuestions] and
+ * [glassesQuestions]: the backend's "sources" (questions asked on the phone and through the glasses).
+ */
 internal data class HistoryItem(
     val id: String,
     val title: String?,
     val lastMessageAt: Long,
     val messageCount: Int,
-    val channel: String,
-    val deviceLabel: String?,
-)
+    val phoneQuestions: Int = 0,
+    val glassesQuestions: Int = 0,
+) {
+    val origin: HistoryOrigin get() = when {
+        glassesQuestions > 0 && phoneQuestions > 0 -> HistoryOrigin.BOTH
+        glassesQuestions > 0 -> HistoryOrigin.GLASSES
+        else -> HistoryOrigin.PHONE
+    }
+}
+
+/** A section of the list: "Hoy", "Ayer", "Últimos 7 días", "Este mes" or "Anteriores", newest first. */
+internal data class HistoryGroup(val label: String, val items: List<HistoryItem>)
 
 /** One saved message: [role] "user" or "assistant". */
 internal data class HistoryMessage(val role: String, val content: String)
@@ -39,13 +59,44 @@ internal object HistoryTexts {
 
     fun title(item: HistoryItem): String = item.title?.trim()?.takeIf { it.isNotEmpty() } ?: UNTITLED
 
-    /** "Hoy 14:30 · Web · 4 mensajes". [now] in milliseconds; [zone] the phone's time zone. */
-    fun subtitle(item: HistoryItem, now: Long, zone: TimeZone = TimeZone.getDefault()): String =
-        listOf(whenText(item.lastMessageAt * 1000, now, zone), origin(item), count(item.messageCount)).joinToString(" · ")
+    /** "14:30 · 4 mensajes" (today and yesterday: the group says the day) or "3 nov · 4 mensajes". */
+    fun subtitle(item: HistoryItem, now: Long, zone: TimeZone = TimeZone.getDefault()): String {
+        val stamp = whenText(item.lastMessageAt * 1000, now, zone).removePrefix("Hoy ").removePrefix("Ayer ")
+        return "$stamp · ${count(item.messageCount)}"
+    }
 
-    /** Where it was held: "Web", or the device's name ("Celular" when it has none). */
-    fun origin(item: HistoryItem): String =
-        if (item.channel == "web") "Web" else item.deviceLabel?.trim()?.takeIf { it.isNotEmpty() } ?: "Celular"
+    /** Spoken description of the icons, for TalkBack. */
+    fun originText(origin: HistoryOrigin): String = when (origin) {
+        HistoryOrigin.PHONE -> "En el celular"
+        HistoryOrigin.GLASSES -> "Con los lentes"
+        HistoryOrigin.BOTH -> "En el celular y con los lentes"
+    }
+
+    /** The list in sections by the last message's day, keeping the backend's order (newest first). */
+    fun groups(items: List<HistoryItem>, now: Long, zone: TimeZone = TimeZone.getDefault()): List<HistoryGroup> {
+        val today = Calendar.getInstance(zone).apply {
+            timeInMillis = now
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }
+        fun daysBefore(days: Int) = (today.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, -days) }.timeInMillis
+        val month = (today.clone() as Calendar).apply { set(Calendar.DAY_OF_MONTH, 1) }.timeInMillis
+        val labels = items.map { item ->
+            val at = item.lastMessageAt * 1000
+            when {
+                at >= today.timeInMillis -> "Hoy"
+                at >= daysBefore(1) -> "Ayer"
+                at >= daysBefore(7) -> "Últimos 7 días"
+                at >= month -> "Este mes"
+                else -> "Anteriores"
+            }
+        }
+        val groups = mutableListOf<HistoryGroup>()
+        items.zip(labels).forEach { (item, label) ->
+            if (groups.lastOrNull()?.label == label) groups[groups.size - 1] = groups.last().copy(items = groups.last().items + item)
+            else groups += HistoryGroup(label, listOf(item))
+        }
+        return groups
+    }
 
     fun count(messages: Int): String = if (messages == 1) "1 mensaje" else "$messages mensajes"
 
