@@ -50,8 +50,28 @@ internal data class HistoryItem(
 /** A section of the list: "Hoy", "Ayer", "Últimos 7 días", "Este mes" or "Anteriores", newest first. */
 internal data class HistoryGroup(val label: String, val items: List<HistoryItem>)
 
-/** One saved message: [role] "user" or "assistant". */
-internal data class HistoryMessage(val role: String, val content: String)
+/** One saved message: [role] "user" or "assistant"; [id] its id on the server; [vote] the user's 👍/👎 (1, -1, null). */
+internal data class HistoryMessage(val role: String, val content: String, val id: Long? = null, val vote: Int? = null)
+
+/**
+ * 👍/👎 on the assistant's answers (2026-11-26). 👍 is only counted; 👎 shares that question and answer (and the
+ * optional comment) with the administrators, so the app says it before sending.
+ */
+internal object Votes {
+    const val ENDPOINT = "/api/v1/devices/me/feedback"
+    const val COMMENT_MAX = 500
+
+    /** The vote a click leaves: the same thumb again removes it (0). */
+    fun next(current: Int?, clicked: Int): Int = if (current == clicked) 0 else clicked
+
+    /** The request body: the comment only with 👎, trimmed and cut to [COMMENT_MAX]. */
+    fun body(messageId: Long, value: Int, comment: String?): Map<String, Any> {
+        val text = if (value == -1) comment.orEmpty().trim().take(COMMENT_MAX) else ""
+        val body = linkedMapOf<String, Any>("message_id" to messageId, "value" to value)
+        if (text.isNotEmpty()) body["comment"] = text
+        return body
+    }
+}
 
 internal object HistoryTexts {
     private val months = listOf("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")

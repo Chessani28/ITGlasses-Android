@@ -14,7 +14,12 @@ import androidx.core.view.ViewCompat
  * rebuilds the row in its own position when what is drawn changes), adds at the end with a short fade, then
  * scrolls to the last message. Android-only: verified on the phone.
  */
-internal class ChatBubbles(private val container: LinearLayout, private val scroll: ScrollView) {
+internal class ChatBubbles(
+    private val container: LinearLayout,
+    private val scroll: ScrollView,
+    /** 👍 (1) or 👎 (-1) tapped under a saved answer; the Activity sends it and calls [ChatLog.voted]. */
+    private val onVote: (ChatEntry.Assistant, Int) -> Unit = { _, _ -> },
+) {
     private class Row(
         val view: View,
         val bubble: TextView? = null,
@@ -26,7 +31,13 @@ internal class ChatBubbles(private val container: LinearLayout, private val scro
         val speech: SpeechLabel? = null,
         /** Voice placeholder: rebuilt in place once its text arrives. */
         val placeholder: Boolean = false,
+        /** 👍/👎 under a saved answer. */
+        val votes: VoteRow? = null,
     )
+
+    private class VoteRow(val row: View, val up: TextView, val down: TextView) {
+        var entry: ChatEntry.Assistant? = null
+    }
 
     private class SpeechLabel(val row: View, val text: TextView, val pulse: Pulse) {
         var speaking = false
@@ -70,7 +81,10 @@ internal class ChatBubbles(private val container: LinearLayout, private val scro
                 is ChatEntry.User ->
                     if (row.placeholder && entry.status != ChatEntry.Status.TRANSCRIBING) rebuild(entry, row)
                     else row.notSent?.visibility = if (entry.status == ChatEntry.Status.FAILED) View.VISIBLE else View.GONE
-                is ChatEntry.Assistant -> row.speech?.let { show(it, entry.speech) }
+                is ChatEntry.Assistant -> {
+                    row.speech?.let { show(it, entry.speech) }
+                    row.votes?.let { show(it, entry) }
+                }
                 else -> Unit
             }
         }
@@ -138,7 +152,10 @@ internal class ChatBubbles(private val container: LinearLayout, private val scro
                 reserved = reserved)
             val speech = speechLabel()
             show(speech, entry.speech)
-            Row(column(Gravity.START, withAvatar(bubble), speech.row), bubble = bubble, reserved = reserved, speech = speech)
+            val votes = if (entry.messageId != null) voteRow(reserved).also { show(it, entry) } else null
+            val parts = listOfNotNull(withAvatar(bubble), speech.row, votes?.row)
+            Row(column(Gravity.START, *parts.toTypedArray()), bubble = bubble, reserved = reserved, speech = speech,
+                votes = votes)
         }
         is ChatEntry.Notice -> {
             val bubble = text(entry.text, R.color.itg_warning, R.drawable.bubble_notice)
@@ -200,6 +217,44 @@ internal class ChatBubbles(private val container: LinearLayout, private val scro
      * aligned with the bubble (past the avatar). A polite live region: TalkBack announces the change without
      * cutting the answer.
      */
+    /** 👍 / 👎 under a saved answer, aligned with the bubble (after the avatar). */
+    private fun voteRow(reserved: Int): VoteRow {
+        fun thumb(symbol: String, description: Int) = TextView(context).apply {
+            text = symbol
+            textSize = 16f
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+            contentDescription = context.getString(description)
+            isClickable = true
+            isFocusable = true
+            minWidth = dp(40)
+            minHeight = dp(36)
+            gravity = Gravity.CENTER
+        }
+        val up = thumb("\uD83D\uDC4D", R.string.feedback_useful)
+        val down = thumb("\uD83D\uDC4E", R.string.feedback_not_useful)
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(reserved, 0, 0, 0)
+            addView(up)
+            addView(down)
+        }
+        val votes = VoteRow(row, up, down)
+        up.setOnClickListener { votes.entry?.let { onVote(it, 1) } }
+        down.setOnClickListener { votes.entry?.let { onVote(it, -1) } }
+        return votes
+    }
+
+    /** The pressed thumb is fully visible and marked; the other one stays discreet. */
+    private fun show(votes: VoteRow, entry: ChatEntry.Assistant) {
+        votes.entry = entry
+        for ((view, value) in listOf(votes.up to 1, votes.down to -1)) {
+            val pressed = entry.vote == value
+            view.alpha = if (pressed) 1f else 0.45f
+            view.isSelected = pressed
+            view.setBackgroundResource(if (pressed) R.drawable.bubble_user else 0)
+        }
+    }
+
     private fun speechLabel(): SpeechLabel {
         val icon = ImageView(context).apply {
             setImageResource(R.drawable.ic_speaker)

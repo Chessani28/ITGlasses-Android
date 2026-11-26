@@ -59,7 +59,9 @@ class MainActivity : AppCompatActivity() {
     private val strokeColor by lazy { ColorTransition(this) { binding.cardPairing.strokeColor = it } }
     // Stage C: pairing-mode conversation in bubbles (shared-token mode keeps tv_chat_output).
     private val chatLog = ChatLog()
-    private val chatBubbles by lazy { ChatBubbles(binding.chatMessages, binding.mainScroll) }
+    private val chatBubbles by lazy {
+        ChatBubbles(binding.chatMessages, binding.mainScroll, onVote = { entry, clicked -> vote(entry, clicked) })
+    }
     // Shared-token mode only for an APK without pairing origin; with one, the stored token is kept but never sent.
     private val legacyAuth = AuthInterceptor { activeToken }
     private val backendUrl: String?
@@ -613,12 +615,13 @@ class MainActivity : AppCompatActivity() {
                     val responseBody = response.body?.string()
                     runOnUiThread {
                         if (response.isSuccessful && responseBody != null) {
-                            val answer = try {
-                                answerOf(org.json.JSONObject(responseBody), responseBody).text
-                            } catch (e: Exception) { responseBody }
+                            val reply = try {
+                                answerOf(org.json.JSONObject(responseBody), responseBody)
+                            } catch (e: Exception) { AssistantReply(responseBody) }
+                            val answer = reply.text
                             if (pairing.configured) {
                                 callErrors.onSuccess()
-                                chatBubbles.apply(chatLog.answered(chatId, answer))
+                                chatBubbles.apply(chatLog.answered(chatId, answer, reply.messageId))
                             } else {
                                 binding.tvChatOutput.text = "${binding.tvChatOutput.text}\n$message -> $answer"
                                 binding.etMessage.text?.clear()
@@ -843,7 +846,11 @@ class MainActivity : AppCompatActivity() {
                 else historyCall(historyRequest(ChatHistory.READ, id = id))
             val messages = json?.optJSONObject("conversation")?.optJSONArray("messages")?.let { array ->
                 (0 until array.length()).mapNotNull { array.optJSONObject(it) }
-                    .map { HistoryMessage(it.optString("role"), it.optString("content")) }
+                    .map { item ->
+                        HistoryMessage(item.optString("role"), item.optString("content"),
+                            id = if (item.has("id") && !item.isNull("id")) item.optLong("id") else null,
+                            vote = if (item.has("feedback") && !item.isNull("feedback")) item.optInt("feedback") else null)
+                    }
             }
             runOnUiThread {
                 historyDone()
@@ -871,6 +878,64 @@ class MainActivity : AppCompatActivity() {
                 assistantSession = null
                 showChange(chatLog.clear())
                 historyToast(R.string.history_new_done)
+            }
+        }
+    }
+
+    // ---- 👍/👎 on an answer (Votes): 👎 asks for an optional comment and says it is shared with the admins. ----
+
+    private fun vote(entry: ChatEntry.Assistant, clicked: Int) {
+        val messageId = entry.messageId ?: return
+        val next = Votes.next(entry.vote, clicked)
+        if (next != -1) {
+            sendVote(entry.id, messageId, next, null)
+            return
+        }
+        if (isFinishing || isDestroyed) return
+        val comment = androidx.appcompat.widget.AppCompatEditText(this).apply {
+            hint = getString(R.string.feedback_comment_hint)
+            minLines = 2
+            filters = arrayOf(android.text.InputFilter.LengthFilter(Votes.COMMENT_MAX))
+        }
+        val notice = android.widget.TextView(this).apply {
+            text = getString(R.string.feedback_share_notice)
+            textSize = 13f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.itg_warning))
+        }
+        val pad = (20 * resources.displayMetrics.density).toInt()
+        val content = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(pad, pad / 2, pad, 0)
+            addView(comment)
+            addView(notice)
+        }
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(R.string.feedback_title)
+            .setView(content)
+            .setNegativeButton(R.string.feedback_cancel, null)
+            .setPositiveButton(R.string.feedback_send) { _, _ -> sendVote(entry.id, messageId, -1, comment.text?.toString()) }
+            .show()
+    }
+
+    private fun sendVote(answer: Long, messageId: Long, value: Int, comment: String?) {
+        val json = org.json.JSONObject(Votes.body(messageId, value, comment))
+        val request = Request.Builder().url("${pairing.origin}${Votes.ENDPOINT}")
+            .post(json.toString().toRequestBody("application/json".toMediaType())).build()
+        lifecycleScope.launch(Dispatchers.IO) {
+            val saved = try {
+                okHttpClient.newCall(request).execute().use { it.isSuccessful }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                false
+            }
+            runOnUiThread {
+                if (!saved) {
+                    historyToast(R.string.feedback_failed)
+                    return@runOnUiThread
+                }
+                showChange(chatLog.voted(answer, if (value == 0) null else value))
+                if (value != 0) historyToast(if (value == 1) R.string.feedback_thanks_up else R.string.feedback_thanks_down)
             }
         }
     }
@@ -1220,7 +1285,7 @@ class MainActivity : AppCompatActivity() {
                     voiceTiming("answer")
                     voiceFlow.on(VoiceEvent.ANSWERED)
                     if (inChat) {
-                        val (id, change) = chatLog.voiceAnswered(message, answer)  // "Preparando la voz…"
+                        val (id, change) = chatLog.voiceAnswered(message, answer, reply.messageId)  // "Preparando la voz…"
                         voiceAnswer = id
                         showChange(change)
                     } else {
@@ -1373,7 +1438,8 @@ class MainActivity : AppCompatActivity() {
         val returned = if (obj.isNull("session_id")) null else obj.optString("session_id")
         assistantSession = AssistantSession.next(assistantSession, returned)
         val speech = if (obj.isNull("speech")) null else obj.optString("speech")
-        return AssistantReply(obj.optString("answer", body), speech)
+        val messageId = if (obj.has("message_id") && !obj.isNull("message_id")) obj.optLong("message_id") else null
+        return AssistantReply(obj.optString("answer", body), speech, messageId)
     }
 
     /** POST recognized text to the chat: the assistant in pairing mode, /api/v1/chat in shared-token mode. */

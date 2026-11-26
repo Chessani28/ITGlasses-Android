@@ -24,7 +24,9 @@ internal sealed class ChatEntry {
         ChatEntry() {
         val showsBasicEngine: Boolean get() = basicEngine && status != Status.TRANSCRIBING
     }
-    data class Assistant(override val id: Long, val text: String, val speech: Speech? = null) : ChatEntry()
+    /** [messageId]: the saved answer's id on the server (for 👍/👎; null when it was not saved). [vote]: 1, -1 or null. */
+    data class Assistant(override val id: Long, val text: String, val speech: Speech? = null,
+                         val messageId: Long? = null, val vote: Int? = null) : ChatEntry()
     data class Notice(override val id: Long, val text: String) : ChatEntry()
     /** Waiting bubble while the answer to message [forMessage] is pending. */
     data class Typing(override val id: Long, val forMessage: Long, val waiting: Waiting = Waiting.GENERATING) : ChatEntry()
@@ -57,9 +59,19 @@ internal class ChatLog(private val limit: Int = 100) {
         return user.id to finish(added = listOf(user, typing), removed = removed)
     }
 
-    fun answered(message: Long, answer: String): ChatChange {
+    fun answered(message: Long, answer: String, messageId: Long? = null): ChatChange {
         val removed = removeAll { it is ChatEntry.Typing && it.forMessage == message }
-        return finish(listOf(ChatEntry.Assistant(nextId++, answer)), removed, mark(message, ChatEntry.Status.SENT))
+        return finish(listOf(ChatEntry.Assistant(nextId++, answer, messageId = messageId)), removed,
+            mark(message, ChatEntry.Status.SENT))
+    }
+
+    /** The user's 👍/👎 on an answer (null: removed); nothing when the answer is no longer shown. */
+    fun voted(answer: Long, vote: Int?): ChatChange {
+        val index = list.indexOfFirst { it is ChatEntry.Assistant && it.id == answer }
+        if (index < 0) return ChatChange()
+        val updated = (list[index] as ChatEntry.Assistant).copy(vote = vote)
+        list[index] = updated
+        return ChatChange(updated = listOf(updated))
     }
 
     /** Not sent. [notice] is shown below it unless the pairing card already explains (then null). */
@@ -93,7 +105,7 @@ internal class ChatLog(private val limit: Int = 100) {
         val added = messages.filter { it.content.isNotBlank() }.mapNotNull { message ->
             when (message.role) {
                 "user" -> ChatEntry.User(nextId++, message.content, ChatEntry.Status.SENT)
-                "assistant" -> ChatEntry.Assistant(nextId++, message.content)
+                "assistant" -> ChatEntry.Assistant(nextId++, message.content, messageId = message.id, vote = message.vote)
                 else -> null
             }
         }.takeLast(limit)
@@ -128,9 +140,9 @@ internal class ChatLog(private val limit: Int = 100) {
         finish(listOf(ChatEntry.Assistant(nextId++, text)), removePlaceholder(message))
 
     /** Answer to a voice question: replaces "Pensando", marks the question sent, label "Preparando la voz…". */
-    fun voiceAnswered(message: Long, answer: String): Pair<Long, ChatChange> {
+    fun voiceAnswered(message: Long, answer: String, messageId: Long? = null): Pair<Long, ChatChange> {
         val removed = removeAll { it is ChatEntry.Typing && it.forMessage == message }
-        val assistant = ChatEntry.Assistant(nextId++, answer, ChatEntry.Speech.PREPARING)
+        val assistant = ChatEntry.Assistant(nextId++, answer, ChatEntry.Speech.PREPARING, messageId = messageId)
         return assistant.id to finish(listOf(assistant), removed, mark(message, ChatEntry.Status.SENT))
     }
 

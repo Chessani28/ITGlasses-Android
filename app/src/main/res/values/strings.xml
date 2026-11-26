@@ -161,4 +161,14 @@
     <string name="engine_notice_startup">Whisper no pudo iniciar en la GPU; usando el motor de voz básico, la transcripción puede ser menos precisa.</string>
     <string name="engine_notice_vosk">Whisper no está disponible; usando el motor de voz básico, la transcripción puede ser menos precisa.</string>
     <string name="engine_notice_cpu">La voz se transcribe en la CPU porque la GPU no está disponible; puede tardar más.</string>
+    <string name="feedback_useful">Respuesta útil</string>
+    <string name="feedback_not_useful">Respuesta no útil</string>
+    <string name="feedback_title">¿Qué estuvo mal?</string>
+    <string name="feedback_comment_hint">Cuéntanos qué faltó o qué estuvo mal (opcional)</string>
+    <string name="feedback_share_notice">Al enviarlo, esta pregunta y respuesta se comparten con el administrador para mejorar el asistente.</string>
+    <string name="feedback_send">Enviar</string>
+    <string name="feedback_cancel">Cancelar</string>
+    <string name="feedback_failed">No se pudo guardar tu calificación. Inténtalo de nuevo.</string>
+    <string name="feedback_thanks_up">Gracias, nos ayuda a saber qué funciona.</string>
+    <string name="feedback_thanks_down">Gracias, lo revisaremos para mejorar.</string>
 </resources>

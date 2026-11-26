@@ -1,7 +1,7 @@
 package com.itglasses.itglassesandroid
 
 /** An assistant answer: [text] for the bubble, [speech] (backend field, may be absent) for the voice. */
-internal data class AssistantReply(val text: String, val speech: String? = null)
+internal data class AssistantReply(val text: String, val speech: String? = null, val messageId: Long? = null)
 
 /**
  * What the voice reads of an answer in pairing mode. The backend's `speech` when it has text; otherwise the answer
