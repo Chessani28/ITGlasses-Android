@@ -154,4 +154,9 @@
     <string name="history_new_failed">No se pudo empezar una conversación nueva. Inténtalo de nuevo.</string>
     <string name="history_new_done">Conversación nueva. Tu siguiente pregunta empieza de cero.</string>
     <string name="history_busy">Espera a que termine la respuesta.</string>
+    <string name="engine_notice_vram">Whisper no está disponible por memoria de la GPU; usando el motor de voz básico, la transcripción puede ser menos precisa.</string>
+    <string name="engine_notice_gpu">Whisper no puede usar la GPU en este momento; usando el motor de voz básico, la transcripción puede ser menos precisa.</string>
+    <string name="engine_notice_startup">Whisper no pudo iniciar en la GPU; usando el motor de voz básico, la transcripción puede ser menos precisa.</string>
+    <string name="engine_notice_vosk">Whisper no está disponible; usando el motor de voz básico, la transcripción puede ser menos precisa.</string>
+    <string name="engine_notice_cpu">La voz se transcribe en la CPU porque la GPU no está disponible; puede tardar más.</string>
 </resources>

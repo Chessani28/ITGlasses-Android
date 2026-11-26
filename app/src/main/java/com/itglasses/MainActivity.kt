@@ -1118,7 +1118,11 @@ class MainActivity : AppCompatActivity() {
                 // 2. Ollama chat.
                 runOnUiThread {
                     voiceFlow.on(VoiceEvent.TRANSCRIBED)
-                    if (inChat) showChange(chatLog.voiceTranscribed(message, transcript.text, transcript.basicEngine))
+                    if (inChat) {
+                        // Why a lesser engine transcribed it: once, under the question, until the voice is normal.
+                        engineNotices.next(transcript.engineNotice)?.let { showChange(chatLog.notice(engineNoticeText(it))) }
+                        showChange(chatLog.voiceTranscribed(message, transcript.text, transcript.basicEngine))
+                    }
                     setState(UiState.Thinking)
                 }
                 val reply = sendToOllama(transcript.text)
@@ -1181,7 +1185,19 @@ class MainActivity : AppCompatActivity() {
         val clarification: String,
         /** Transcribed by the Vosk fallback (pairing mode): "Motor de voz básico". */
         val basicEngine: Boolean = false,
+        /** Pairing mode: why a lesser engine transcribed it (Vosk or Whisper on the CPU), or null. */
+        val engineNotice: EngineNotice? = null,
     )
+
+    private val engineNotices = EngineNotices()
+
+    private fun engineNoticeText(notice: EngineNotice): String = getString(when (notice) {
+        EngineNotice.VRAM -> R.string.engine_notice_vram
+        EngineNotice.GPU_UNAVAILABLE -> R.string.engine_notice_gpu
+        EngineNotice.STARTUP -> R.string.engine_notice_startup
+        EngineNotice.VOSK -> R.string.engine_notice_vosk
+        EngineNotice.CPU -> R.string.engine_notice_cpu
+    })
 
     /** Debug builds only: elapsed time since "Detener y enviar", engine and microphone. Never text or audio. */
     /** Debug builds only: the failed call's exception type and HTTP status (no message, text or audio). */
@@ -1239,6 +1255,8 @@ class MainActivity : AppCompatActivity() {
             needsClarification = obj.optBoolean("needs_clarification", false),
             clarification = obj.optString("clarification", ""),
             basicEngine = SttEngine.isBasic(engine),
+            engineNotice = if (pairing.configured) EngineNotice.of(SttEngine.isBasic(engine),
+                obj.optString("fallback_reason").takeIf { !obj.isNull("fallback_reason") }) else null,
         )
     }
 
