@@ -32,10 +32,10 @@ internal class PairingError(
 /** Reply to /pairing/requests: active (this key is already approved) or a pending code. */
 internal data class Registration(val active: Boolean, val code: String, val expiresAt: Long, val pollInterval: Int)
 
-internal class DevicePairing(context: Context, val origin: String) {
+internal class DevicePairing(context: Context, val origin: String, val pin: String? = null) {
     private val prefs = context.getSharedPreferences("itglasses_pairing", Context.MODE_PRIVATE)
     private val alias = "itglasses-" + encode(sha(origin))
-    private val transport = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
+    private val transport = ServerTrust.apply(OkHttpClient.Builder(), origin, pin).followRedirects(false).followSslRedirects(false)
         .retryOnConnectionFailure(false).build()
     private var access = ""
     private var deadline = 0L

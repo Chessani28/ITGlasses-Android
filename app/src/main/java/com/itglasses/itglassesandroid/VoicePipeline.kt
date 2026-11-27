@@ -65,7 +65,7 @@ internal class VoicePipeline(
     @Volatile private var session: String? = null
     private var player: MediaPlayer? = null
 
-    private val client: OkHttpClient = OkHttpClient.Builder()
+    private val client: OkHttpClient = ServerTrust.apply(OkHttpClient.Builder(), pairing.origin, pairing.pin)
         .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
         .addInterceptor(BusyRetryInterceptor())
         .addInterceptor { chain -> pairing.authorize(chain) }

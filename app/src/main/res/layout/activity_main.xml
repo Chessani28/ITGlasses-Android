@@ -75,6 +75,10 @@
                     android:layout_height="wrap_content" android:visibility="gone"/>
                 <Button android:id="@+id/btn_pair" android:layout_width="match_parent"
                     android:layout_height="wrap_content" android:visibility="gone"/>
+                <!-- QR pairing: the same APK connects to any ITGlasses server (scanned from its web panel). -->
+                <Button android:id="@+id/btn_scan_server" style="@style/Widget.MaterialComponents.Button.TextButton"
+                    android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_gravity="center_horizontal" android:text="@string/server_scan"/>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

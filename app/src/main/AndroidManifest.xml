@@ -28,6 +28,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- QR pairing: itglasses://emparejar?... from the web panel; the app always asks before using it. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="itglasses" android:host="emparejar" />
+            </intent-filter>
         </activity>
         <service
             android:name=".VoiceForegroundService"

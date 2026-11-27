@@ -114,7 +114,7 @@ class VoiceForegroundService : Service() {
     }
 
     private fun prepare(): Boolean {
-        val pairing = PairingAccess.get(applicationContext, BuildConfig.PAIRING_ORIGIN)
+        val pairing = PairingAccess.current(applicationContext)
         if (!pairing.configured || !pairing.managed) {
             GlassesLog.d("background service start result=not_paired")
             BackgroundVoice.set(this, false)

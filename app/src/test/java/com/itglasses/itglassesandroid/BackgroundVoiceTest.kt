@@ -55,15 +55,22 @@ class BackgroundVoiceTest {
 
     @Test fun devicePairingIsByteForByteTheDemoVersion() {
         // SHA-256 (LF line endings) of DevicePairing.kt at tag demo-lentes-v1: pairing and token renewal unchanged.
+        // QR pairing (2026-11-26) changed exactly two lines: the optional certificate pin and the transport that
+        // uses it. Undoing those two lines must give back the demo file byte for byte.
         val text = source("src/main/java/com/itglasses/itglassesandroid/DevicePairing.kt").replace("\r\n", "\n")
+            .replace("class DevicePairing(context: Context, val origin: String, val pin: String? = null) {",
+                "class DevicePairing(context: Context, val origin: String) {")
+            .replace("private val transport = ServerTrust.apply(OkHttpClient.Builder(), origin, pin).followRedirects(false)",
+                "private val transport = OkHttpClient.Builder().followRedirects(false)")
         val hash = MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
         assertEquals("fb3c80238346312ab725972d01b244e1ba290f697ddeab2c8b83b7ee4bdf4820", hash)
     }
 
     @Test fun activityAndServiceShareOneDevicePairing() {
-        assertTrue(activity.contains("private val pairing by lazy { PairingAccess.get(applicationContext, BuildConfig.PAIRING_ORIGIN) }"))
+        // Both use the server this phone uses (scanned QR, else the APK's built-in origin).
+        assertTrue(activity.contains("private val pairing by lazy { PairingAccess.current(applicationContext) }"))
         assertFalse("ninguna otra instancia en la app", activity.contains("DevicePairing(applicationContext"))
-        assertTrue(service.contains("PairingAccess.get(applicationContext, BuildConfig.PAIRING_ORIGIN)"))
+        assertTrue(service.contains("PairingAccess.current(applicationContext)"))
         assertFalse(service.contains("DevicePairing("))
         assertFalse(pipeline.contains("DevicePairing("))
     }

@@ -171,4 +171,14 @@
     <string name="feedback_failed">No se pudo guardar tu calificación. Inténtalo de nuevo.</string>
     <string name="feedback_thanks_up">Gracias, nos ayuda a saber qué funciona.</string>
     <string name="feedback_thanks_down">Gracias, lo revisaremos para mejorar.</string>
+    <!-- QR pairing (2026-11-26) -->
+    <string name="server_scan">Escanear QR del servidor</string>
+    <string name="server_change">Cambiar de servidor</string>
+    <string name="server_scan_failed">No se pudo abrir el lector de QR. Revisa que Google Play Services esté actualizado.</string>
+    <string name="server_invalid">Ese QR no es de un servidor ITGlasses.</string>
+    <string name="server_same">Ya estás usando este servidor.</string>
+    <string name="server_confirm_title">¿Conectar con este servidor?</string>
+    <string name="server_confirm_detail">%1$s\n\nUsa solo el QR que te dio el administrador de tu empresa. Después tendrá que aprobar este celular.</string>
+    <string name="server_confirm_yes">Conectar</string>
+    <string name="server_save_failed">No se pudo guardar el servidor. Inténtalo de nuevo.</string>
 </resources>

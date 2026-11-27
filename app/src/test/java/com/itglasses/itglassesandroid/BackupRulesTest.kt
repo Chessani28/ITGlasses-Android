@@ -10,7 +10,8 @@ import javax.xml.parsers.DocumentBuilderFactory
 /** The installation identity and the stored shared token must never leave the phone in a backup or transfer. */
 class BackupRulesTest {
     private val android = "http://schemas.android.com/apk/res/android"
-    private val required = setOf("sharedpref" to "itglasses_pairing.xml", "sharedpref" to "itglasses_network_config.xml")
+    private val required = setOf("sharedpref" to "itglasses_pairing.xml", "sharedpref" to "itglasses_network_config.xml",
+        "sharedpref" to "itglasses_server.xml")
 
     private fun file(path: String): File = listOf(File(path), File("app", path)).firstOrNull { it.isFile }
         ?: throw AssertionError("No se encontró $path desde ${File(".").absolutePath}")

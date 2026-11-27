@@ -41,7 +41,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var wearablesIntegration: WearablesIntegration
 
     // One DevicePairing per process, shared with VoiceForegroundService (PairingAccess); DevicePairing is unchanged.
-    private val pairing by lazy { PairingAccess.get(applicationContext, BuildConfig.PAIRING_ORIGIN) }
+    private val pairing by lazy { PairingAccess.current(applicationContext) }
     private val pairingController by lazy {
         PairingController(
             DevicePairingGateway(pairing, { DeviceInfo.name(applicationContext) }, DeviceInfo::model),
@@ -78,7 +78,8 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var assistantSession: String? = null
 
     private val okHttpClient: OkHttpClient by lazy {
-        OkHttpClient.Builder()
+        // A server scanned from a QR is trusted by its certificate pin; the demo APK keeps its pilot CA as before.
+        ServerTrust.apply(OkHttpClient.Builder(), pairing.origin, if (pairing.configured) pairing.pin else null)
             .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
             .addInterceptor(BusyRetryInterceptor())  // Demo lentes (two phones): see BusyRetry.
             .addInterceptor { chain ->
@@ -309,6 +310,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
         onBackPressedDispatcher.addCallback(this, voiceBack)
+        // QR pairing: scan the server from the web panel, or open its itglasses:// link.
+        binding.btnScanServer.setOnClickListener { scanServer() }
+        handleServerLink(intent)
         activeToken = BackendConfiguration.getStoredToken(this)
         val initialUrl = BackendConfiguration.getBaseUrl(this)
         binding.tvBackendUrl.text = initialUrl?.let { getString(R.string.backend_url, it) }
@@ -439,6 +443,8 @@ class MainActivity : AppCompatActivity() {
         strokeColor.to(ContextCompat.getColor(this, PairingTones.stroke(view.tone)))
         if (view.pulse && dotShown) pulse.start() else pulse.stop()
         renderChatEmpty(state == PairingState.Connected)
+        binding.btnScanServer.setText(
+            if (state == PairingState.Connected) R.string.server_change else R.string.server_scan)
     }
 
     /** Welcome only in pairing mode, while Connected and before the first message; voice does not hide it. */
@@ -525,6 +531,52 @@ class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         wearablesIntegration.onNewIntent(intent)
+        handleServerLink(intent)
+    }
+
+    // --- QR pairing (2026-11-26): one APK for any server ---------------------------------------------------
+
+    private fun serverToast(text: Int) = android.widget.Toast.makeText(this, text, android.widget.Toast.LENGTH_LONG).show()
+
+    private fun scanServer() {
+        val options = com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions.Builder()
+            .setBarcodeFormats(com.google.mlkit.vision.barcode.common.Barcode.FORMAT_QR_CODE).build()
+        com.google.mlkit.vision.codescanner.GmsBarcodeScanning.getClient(this, options).startScan()
+            .addOnSuccessListener { offerServer(it.rawValue) }
+            .addOnFailureListener { serverToast(R.string.server_scan_failed) }
+    }
+
+    /** An itglasses://emparejar link opened from the camera app; read once (not again after a rotation). */
+    private fun handleServerLink(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_VIEW) return
+        val text = intent.dataString ?: return
+        intent.data = null
+        offerServer(text)
+    }
+
+    /** Always asks before changing server: anyone could send a link. */
+    private fun offerServer(text: String?) {
+        val link = ServerLink.parse(text)
+        when (ServerChoice.change(link, ServerStore.get(this))) {
+            ServerChange.INVALID -> serverToast(R.string.server_invalid)
+            ServerChange.SAME -> serverToast(R.string.server_same)
+            ServerChange.NEW -> androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.server_confirm_title)
+                .setMessage(getString(R.string.server_confirm_detail, link!!.origin))
+                .setPositiveButton(R.string.server_confirm_yes) { _, _ -> switchServer(link) }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        }
+    }
+
+    /** Saves the server and starts again: a new identity for that server, pairing asks for approval there. */
+    private fun switchServer(link: ServerLink) {
+        if (!ServerStore.save(this, link)) {
+            serverToast(R.string.server_save_failed)
+            return
+        }
+        disableBackgroundVoice()
+        recreate()
     }
 
     private fun connectToBackend() {

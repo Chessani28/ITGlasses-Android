@@ -16,8 +16,12 @@ internal class ProcessSingletons<K, V> {
  * itself is unchanged; this only decides how many instances exist.
  */
 internal object PairingAccess {
-    private val instances = ProcessSingletons<String, DevicePairing>()
+    private val instances = ProcessSingletons<Pair<String, String?>, DevicePairing>()
 
-    fun get(context: Context, origin: String): DevicePairing =
-        instances.get(origin) { DevicePairing(context.applicationContext, it) }
+    fun get(context: Context, origin: String, pin: String? = null): DevicePairing =
+        instances.get(origin to pin) { DevicePairing(context.applicationContext, it.first, it.second) }
+
+    /** The server this phone uses: the one scanned from a QR (ServerStore), else the APK's built-in origin. */
+    fun current(context: Context): DevicePairing =
+        get(context, ServerStore.origin(context), ServerStore.pin(context))
 }
